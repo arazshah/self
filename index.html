@@ -33,7 +33,8 @@
             username: 'arazshah',  // نام کاربری گیت‌هاب
             repo: 'self',            // نام ریپازیتوری
             branch: 'master',                     // شاخه (main یا master)
-            postsFolder: 'posts'               // پوشه فایل‌های md (یا '' برای ریشه)
+            postsFolder: 'posts' ,              // پوشه فایل‌های md (یا '' برای ریشه)
+             imagesFolder: 'images'
         };
 
         const postsGrid = document.getElementById('posts-grid');
@@ -60,28 +61,22 @@
                 const posts = mdFiles.slice(0, 32);
 
                 // ساخت URL برای thumbnail
-                const rawBase = `https://raw.githubusercontent.com/${CONFIG.username}/${CONFIG.repo}/${CONFIG.branch}/${CONFIG.postsFolder}`;
+               const rawBase = `https://raw.githubusercontent.com/${CONFIG.username}/${CONFIG.repo}/${CONFIG.branch}/${CONFIG.imagesFolder}`;
 
                 postsGrid.innerHTML = posts.map(file => {
-                    const baseName = file.name.replace('.md', '');
-                    const imageFile = files.find(f =>
-                        f.name.startsWith(baseName) &&
-                        /\.(jpg|jpeg|png|webp|gif)$/i.test(f.name)
-                    );
-                    const thumbUrl = imageFile
-                        ? imageFile.download_url
-                        : 'https://via.placeholder.com/300x150?text=No+Image';
-
-                    return `
-                <div class="post-card" onclick="loadPost('${file.download_url}', '${file.name}')">
-                    <div class="post-thumb">
-                        <img src="${thumbUrl}" alt="${baseName}" onerror="this.src='https://via.placeholder.com/300x150?text=No+Image'">
-                    </div>
-                    <h3>${formatTitle(file.name)}</h3>
-                    <p>کلیک کنید برای مطالعه...</p>
-                </div>
-            `;
-                }).join('');
+    const baseName = file.name.replace('.md', '');
+    const thumbUrl = `${rawBase}/${baseName}.jpg`;
+    const title = formatTitle(file.name);
+    
+    return `
+        <div class="post-card" onclick="loadPost('${file.download_url}', '${file.name}')">
+            <div class="post-thumb">
+                <img src="${thumbUrl}" alt="${baseName}" onerror="this.src='https://via.placeholder.com/300x150?text=No+Image'">
+            </div>
+            <h3>${title}</h3>
+        </div>
+    `;
+}).join('');
 
             } catch (error) {
                 postsGrid.innerHTML = `<div class="error">خطا: ${error.message}</div>`;
