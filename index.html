@@ -60,7 +60,7 @@
                 const posts = mdFiles.slice(0, 32);
 
                 // ساخت URL برای thumbnail
-                const rawBase = `https://raw.githubusercontent.com/${CONFIG.username}/${CONFIG.repo}/${CONFIG.branch}/${CONFIG.postsFolder}`;
+                const rawBase = `https://raw.githubusercontent.com/${CONFIG.username}/${CONFIG.repo}/${CONFIG.branch}/${CONFIG.postsFolder}/img`;
 
                 postsGrid.innerHTML = posts.map(file => {
                     const baseName = file.name.replace('.md', '');
