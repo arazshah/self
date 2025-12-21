@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>بلاگ من</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Tahoma, Arial, sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }
+
+        header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 1.8rem;
+        }
+
+        /* صفحه اصلی - گرید پست‌ها */
+        #posts-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            padding: 30px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .post-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            min-height: 150px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .post-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+        }
+
+        .post-card h3 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 1rem;
+        }
+
+        .post-card p {
+            color: #666;
+            font-size: 0.85rem;
+            flex-grow: 1;
+        }
+
+        .post-card .date {
+            color: #999;
+            font-size: 0.75rem;
+            margin-top: 10px;
+        }
+
+        /* صفحه مطالعه پست */
+        #post-view {
+            display: none;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 30px;
+        }
+
+        #post-view.active {
+            display: block;
+        }
+
+        #posts-grid.hidden {
+            display: none;
+        }
+
+        .back-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 25px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-bottom: 20px;
+        }
+
+        .back-btn:hover {
+            background: #2980b9;
+        }
+
+        #post-content {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            line-height: 1.8;
+        }
+
+        #post-content h1 {
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+
+        #post-content h2, #post-content h3 {
+            color: #34495e;
+            margin: 20px 0 10px;
+        }
+
+        #post-content p {
+            margin-bottom: 15px;
+            color: #444;
+        }
+
+        #post-content code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+
+        #post-content pre {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 15px 0;
+        }
+
+        #post-content pre code {
+            background: none;
+            color: inherit;
+        }
+
+        #post-content img {
+            max-width: 100%;
+            border-radius: 5px;
+        }
+
+        #post-content a {
+            color: #3498db;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #666;
+        }
+
+        .error {
+            text-align: center;
+            padding: 50px;
+            color: #e74c3c;
+        }
+
+        /* ریسپانسیو */
+        @media (max-width: 1200px) {
+            #posts-grid { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 900px) {
+            #posts-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 600px) {
+            #posts-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>📝 بلاگ من</h1>
+    </header>
+
+    <!-- گرید پست‌ها -->
+    <div id="posts-grid">
+        <div class="loading">در حال بارگذاری پست‌ها...</div>
+    </div>
+
+    <!-- نمایش پست -->
+    <div id="post-view">
+        <button class="back-btn" onclick="goBack()">→ بازگشت به لیست</button>
+        <div id="post-content"></div>
+    </div>
+
+    <script>
+        // ⚠️ تنظیمات - اینجا را تغییر دهید
+        const CONFIG = {
+            username: 'YOUR_GITHUB_USERNAME',  // نام کاربری گیت‌هاب
+            repo: 'YOUR_REPO_NAME',            // نام ریپازیتوری
+            branch: 'main',                     // شاخه (main یا master)
+            postsFolder: 'posts'               // پوشه فایل‌های md (یا '' برای ریشه)
+        };
+
+        const postsGrid = document.getElementById('posts-grid');
+        const postView = document.getElementById('post-view');
+        const postContent = document.getElementById('post-content');
+
+        // دریافت لیست فایل‌های MD
+        async function loadPosts() {
+            try {
+                const path = CONFIG.postsFolder ? `/${CONFIG.postsFolder}` : '';
+                const apiUrl = `https://api.github.com/repos/${CONFIG.username}/${CONFIG.repo}/contents${path}?ref=${CONFIG.branch}`;
+                
+                const response = await fetch(apiUrl);
+                if (!response.ok) throw new Error('خطا در دریافت فایل‌ها');
+                
+                const files = await response.json();
+                const mdFiles = files.filter(f => f.name.endsWith('.md'));
+
+                if (mdFiles.length === 0) {
+                    postsGrid.innerHTML = '<div class="error">هیچ فایل MD یافت نشد</div>';
+                    return;
+                }
+
+                // حداکثر 32 پست (4×8)
+                const posts = mdFiles.slice(0, 32);
+                
+                postsGrid.innerHTML = posts.map(file => `
+                    <div class="post-card" onclick="loadPost('${file.download_url}', '${file.name}')">
+                        <h3>${formatTitle(file.name)}</h3>
+                        <p>کلیک کنید برای مطالعه...</p>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                postsGrid.innerHTML = `<div class="error">خطا: ${error.message}</div>`;
+            }
+        }
+
+        // تبدیل نام فایل به عنوان خوانا
+        function formatTitle(filename) {
+            return filename
+                .replace('.md', '')
+                .replace(/-/g, ' ')
+                .replace(/_/g, ' ');
+        }
+
+        // بارگذاری و نمایش یک پست
+        async function loadPost(url, filename) {
+            postContent.innerHTML = '<div class="loading">در حال بارگذاری...</div>';
+            postsGrid.classList.add('hidden');
+            postView.classList.add('active');
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('خطا در دریافت محتوا');
+                
+                const markdown = await response.text();
+                postContent.innerHTML = marked.parse(markdown);
+                
+            } catch (error) {
+                postContent.innerHTML = `<div class="error">خطا: ${error.message}</div>`;
+            }
+        }
+
+        // بازگشت به لیست
+        function goBack() {
+            postView.classList.remove('active');
+            postsGrid.classList.remove('hidden');
+        }
+
+        // شروع
+        loadPosts();
+    </script>
+</body>
+</html>
