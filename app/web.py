@@ -91,6 +91,10 @@ def register_routes(app: FastAPI) -> None:
                 request.app.state.settings.app_base_url,
             )
             raw_token = auth.create_dashboard_token(user.id, _now())
+            # Do not hold the insert transaction while AvalAI/Bale network
+            # calls are running; concurrent webhook deliveries must remain
+            # writable in SQLite.
+            session.commit()
             try:
                 await process_entry(
                     session,

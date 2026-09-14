@@ -61,5 +61,6 @@ async def run_digest_once(
                 )
             )
             session.flush()
+            session.commit()
             sent += 1
     return DigestJobStats(sent=sent, failed=failed)

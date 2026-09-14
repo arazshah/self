@@ -77,6 +77,7 @@ async def process_entry(
         raise ValueError("متن پیام برای پردازش وجود ندارد")
 
     extraction = await ai_client.extract(transcript, processing_now, user.timezone)
+    outgoing_messages: list[str] = []
     for item in extraction.items:
         due_at, solar_date = _due_date(item, processing_now, user.timezone)
         ambiguous = bool(item.due_raw and due_at is None)
@@ -106,9 +107,12 @@ async def process_entry(
                 )
             )
 
-        await bale_client.send_message(
-            user.bale_chat_id,
-            _confirmation_text(item, item.due_raw, extraction.clarification if ambiguous else None),
+        outgoing_messages.append(
+            _confirmation_text(
+                item,
+                item.due_raw,
+                extraction.clarification if ambiguous else None,
+            )
         )
 
     if extraction.reflection_summary:
@@ -124,12 +128,16 @@ async def process_entry(
                 status="confirmed",
             )
         )
-        await bale_client.send_message(
-            user.bale_chat_id,
-            f"برداشت ثبت‌شده از حالت: {extraction.reflection_summary}",
+        outgoing_messages.append(
+            f"برداشت ثبت‌شده از حالت: {extraction.reflection_summary}"
         )
 
     entry.status = "processed"
     entry.processed_at = utc_now()
     session.flush()
+    # Commit all local state before waiting on Bale. Otherwise SQLite keeps a
+    # write lock while a network request is in flight.
+    session.commit()
+    for message in outgoing_messages:
+        await bale_client.send_message(user.bale_chat_id, message)
     return extraction

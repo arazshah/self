@@ -41,17 +41,20 @@ async def run_scheduler_once(
         user = session.get(User, reminder.user_id)
         if user is None:
             reminder.status = "cancelled"
+            session.commit()
             continue
         reminder.status = "sending"
         session.flush()
+        session.commit()
         try:
             await notifier.send_message(user.bale_chat_id, f"یادآوری: {reminder.text}")
         except Exception:
             reminder.status = "pending"
+            session.commit()
             failed += 1
             continue
         reminder.status = "sent"
         reminder.delivered_at = current
+        session.commit()
         delivered += 1
-    session.flush()
     return SchedulerStats(delivered=delivered, failed=failed)

@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import create_engine
 
-from app.db import init_db, session_scope
+from app.db import init_db, make_engine, session_scope
 from app.repositories import EntryRepository, UserRepository
 
 
@@ -34,3 +34,13 @@ def test_entries_are_scoped_to_the_user(tmp_path):
         first_entries = entries.list_for_user(first.id)
 
     assert [entry.transcript for entry in first_entries] == ["first"]
+
+
+def test_sqlite_uses_wal_and_busy_timeout(tmp_path):
+    engine = make_engine(str(tmp_path / "wal.sqlite3"))
+    with engine.connect() as connection:
+        journal_mode = connection.exec_driver_sql("PRAGMA journal_mode").scalar()
+        busy_timeout = connection.exec_driver_sql("PRAGMA busy_timeout").scalar()
+
+    assert journal_mode.lower() == "wal"
+    assert busy_timeout >= 30000

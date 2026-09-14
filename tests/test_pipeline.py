@@ -47,6 +47,16 @@ class VoiceBale(FakeBale):
         return b"audio"
 
 
+class TransactionCheckingBale(FakeBale):
+    def __init__(self, session):
+        super().__init__()
+        self.session = session
+
+    async def send_message(self, chat_id: int, text: str, reply_markup=None) -> dict:
+        assert not self.session.in_transaction()
+        return await super().send_message(chat_id, text)
+
+
 @pytest.mark.asyncio
 async def test_process_entry_persists_top_level_reflection_and_suggestion(session):
     user = UserRepository(session).get_or_create_by_bale_chat(104, "کاربر احساسات")
@@ -79,6 +89,27 @@ async def test_process_entry_persists_top_level_reflection_and_suggestion(sessio
     assert record.category == "reflection"
     assert record.title == "خستگی و فشار کاری"
     assert record.body == "امروز یک وقفهٔ کوتاه برای استراحت بگذار."
+
+
+@pytest.mark.asyncio
+async def test_process_entry_releases_sqlite_transaction_before_bale_call(session):
+    user = UserRepository(session).get_or_create_by_bale_chat(105, "کاربر هم‌زمان")
+    entry = EntryRepository(session).create(
+        user_id=user.id,
+        transcript="یک ایده دارم",
+        created_at=datetime(2026, 9, 14, 5, 0, tzinfo=UTC),
+        source_message_id=14,
+    )
+    session.commit()
+
+    await process_entry(
+        session,
+        entry,
+        user,
+        ai_client=FakeAI(),
+        bale_client=TransactionCheckingBale(session),
+        now=datetime(2026, 9, 14, 5, 0, tzinfo=UTC),
+    )
 
 
 @pytest.mark.asyncio
