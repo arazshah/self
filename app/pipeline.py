@@ -7,8 +7,8 @@ from typing import Protocol
 from sqlalchemy.orm import Session
 
 from app.ai import normalize_extraction
-from app.bale import entry_keyboard
 from app.models import Entry, ExtractedRecord, Reminder, User, utc_now
+from app.reports import CATEGORY_ICONS, CATEGORY_LABELS
 from app.schemas import ExtractedItem, ExtractionResult
 from app.time_utils import resolve_persian_datetime
 
@@ -39,8 +39,11 @@ class PipelineBale(Protocol):
 
 
 async def _send_with_optional_keyboard(
-    bale_client: PipelineBale, chat_id: int, text: str, keyboard: dict
+    bale_client: PipelineBale, chat_id: int, text: str, keyboard: dict | None
 ) -> None:
+    if keyboard is None:
+        await bale_client.send_message(chat_id, text)
+        return
     try:
         await bale_client.send_message(chat_id, text, reply_markup=keyboard)
     except TypeError as error:
@@ -76,10 +79,11 @@ def _due_date(
 
 
 def _confirmation_text(item: ExtractedItem, due_raw: str | None, clarification: str | None) -> str:
-    suffix = f" زمان: {due_raw}" if due_raw else ""
+    category = f"{CATEGORY_ICONS.get(item.category, '📝')} {CATEGORY_LABELS.get(item.category, item.category)}"
+    suffix = f"\n⏰ زمان: {due_raw}" if due_raw else ""
     if clarification:
-        suffix += f"\n{clarification}"
-    return f"این مورد را ثبت کردم: {item.title}{suffix}"
+        suffix += f"\n⚠️ {clarification}"
+    return f"✅ ثبت شد\n{category}: {item.title}{suffix}"
 
 
 async def process_entry(
@@ -106,7 +110,7 @@ async def process_entry(
 
     extraction = await ai_client.extract(transcript, processing_now, user.timezone)
     extraction = normalize_extraction(extraction, transcript)
-    outgoing_messages: list[tuple[str, dict]] = []
+    outgoing_messages: list[tuple[str, dict | None]] = []
     for item in extraction.items:
         due_at, solar_date = _due_date(item, processing_now, user.timezone, transcript)
         ambiguous = bool(item.due_raw and due_at is None)
@@ -139,11 +143,11 @@ async def process_entry(
         outgoing_messages.append(
             (
                 _confirmation_text(
-                item,
-                item.due_raw,
-                extraction.clarification if ambiguous else None,
+                    item,
+                    item.due_raw,
+                    extraction.clarification if ambiguous else None,
                 ),
-                entry_keyboard(entry.id),
+                None,
             )
         )
 
@@ -160,12 +164,7 @@ async def process_entry(
                 status="confirmed",
             )
         )
-        outgoing_messages.append(
-            (
-                f"برداشت ثبت‌شده از حالت: {extraction.reflection_summary}",
-                entry_keyboard(entry.id),
-            )
-        )
+        outgoing_messages.append((f"🌿 بازتاب ثبت شد: {extraction.reflection_summary}", None))
 
     entry.status = "processed"
     entry.processed_at = utc_now()

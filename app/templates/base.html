@@ -3,6 +3,9 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}صندوقچه{% endblock %}</title><link rel="stylesheet" href="/static/style.css">
+  <style>
+    .nav-group{margin:0}.nav-group summary{list-style:none;cursor:pointer}.nav-group summary::-webkit-details-marker{display:none}.nav-group summary i{margin-right:auto;font-style:normal;font-size:.75rem}.sub-nav{display:grid;gap:3px;margin:3px 8px 7px 0;border-right:1px solid #477064;padding-right:9px}.sub-item{color:#9ebcb0;text-decoration:none;font-size:.73rem;padding:6px 8px;border-radius:8px}.sub-item:hover,.sub-item.selected{background:#285247;color:#fff}.top-actions{display:flex;align-items:center;gap:14px}.top-actions a{color:#9ebcb0;text-decoration:none;font-size:.8rem}@media(max-width:620px){.nav-group{position:relative}.nav-group .sub-nav{display:none;position:absolute;bottom:58px;right:-75px;width:180px;background:#18312b;border:1px solid #315248;border-radius:12px;padding:8px;margin:0;box-shadow:0 -10px 25px #102c2040}.nav-group[open] .sub-nav{display:grid}.nav-group summary i{display:none}}
+  </style>
 </head>
 <body>
   <div class="app-shell">
@@ -13,9 +16,9 @@
         <a class="nav-item active" href="/dashboard">⌂ <span>نمای کلی</span></a>
         <a class="nav-item" href="/dashboard?period=today">◷ <span>امروز</span></a>
         <a class="nav-item" href="/dashboard?period=week">▦ <span>این هفته</span></a>
-        <a class="nav-item" href="/dashboard#reminders">♧ <span>یادآوری‌ها</span></a>
+        <a class="nav-item" href="/dashboard#reminders">⏰ <span>یادآوری‌های باز</span></a>
         <a class="nav-item" href="/reports/daily">◌ <span>گزارش‌ها</span></a>
-        <a class="nav-item" href="/dashboard#categories">◈ <span>دسته‌بندی‌ها</span></a>
+        <details class="nav-group" id="category-menu" {% if category is defined and category %}open{% endif %}><summary class="nav-item">◈ <span>دسته‌بندی‌ها</span><i>⌄</i></summary><div class="sub-nav">{% for key, label in labels.items() %}<a class="sub-item {% if category is defined and category == key %}selected{% endif %}" href="/dashboard?category={{ key }}">{{ icons.get(key, '•') }} {{ label }}</a>{% endfor %}</div></details>
       </nav>
       <div class="sidebar-bottom"><a class="nav-item" href="/settings">⚙ <span>تنظیمات</span></a><form action="/logout" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="nav-item nav-button">↪ <span>خروج</span></button></form></div>
     </aside>

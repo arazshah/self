@@ -22,6 +22,8 @@ from app.time_utils import format_persian_date, format_persian_datetime
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["persian_datetime"] = format_persian_datetime
 templates.env.globals["persian_date"] = format_persian_date
+templates.env.globals["labels"] = CATEGORY_LABELS
+templates.env.globals["icons"] = CATEGORY_ICONS
 
 
 def _now() -> datetime:
@@ -88,15 +90,15 @@ def register_routes(app: FastAPI) -> None:
                 repository = EntryRepository(session)
                 if kind == "entry" and action == "edit":
                     changed = repository.request_entry_edit(object_id, user.id)
-                    message = "متن اصلاح‌شدهٔ همین ثبت را در پیام بعدی بفرست."
+                    message = "✏️ متن اصلاح‌شدهٔ همین ثبت را در پیام بعدی بفرست."
                 elif kind == "entry" and action == "delete":
                     changed = repository.soft_delete_entry(object_id, user.id)
-                    message = "ثبت حذف شد." if changed else "این ثبت پیدا نشد یا قبلاً حذف شده است."
+                    message = "🗑 ثبت حذف شد." if changed else "⚠️ این ثبت پیدا نشد یا قبلاً حذف شده است."
                 elif kind == "reminder" and action in {"done", "cancel"}:
                     changed = repository.update_reminder_status(
                         object_id, user.id, "done" if action == "done" else "cancelled"
                     )
-                    message = "یادآوری به‌روزرسانی شد." if changed else "یادآوری پیدا نشد."
+                    message = "✅ یادآوری به‌روزرسانی شد." if changed else "⚠️ یادآوری پیدا نشد."
                 elif kind == "reminder" and action == "tomorrow":
                     reminder = session.scalar(
                         select(Reminder).where(
@@ -107,7 +109,7 @@ def register_routes(app: FastAPI) -> None:
                     )
                     if reminder is None:
                         changed = False
-                        message = "یادآوری پیدا نشد."
+                        message = "⚠️ یادآوری پیدا نشد."
                     else:
                         local_due = reminder.due_at.replace(tzinfo=UTC).astimezone(ZoneInfo(user.timezone))
                         changed = repository.snooze_reminder(
@@ -115,10 +117,10 @@ def register_routes(app: FastAPI) -> None:
                             user.id,
                             (local_due + timedelta(days=1)).astimezone(UTC),
                         )
-                        message = "یادآوری برای فردا تنظیم شد."
+                        message = "🔁 یادآوری برای فردا تنظیم شد."
                 else:
                     changed = False
-                    message = "این دکمه هنوز فعال نشده است."
+                    message = "ℹ️ این دکمه هنوز فعال نشده است."
                 if changed:
                     session.commit()
             await _answer_callback(request.app.state.bale, callback.query_id, message)
@@ -147,19 +149,26 @@ def register_routes(app: FastAPI) -> None:
                 session.commit()
                 await request.app.state.bale.send_message(
                     user.bale_chat_id,
-                    "منوی صندوقچه آماده است. برای ورود، دکمهٔ زیر را بزن:",
+                    "📊 برای ورود به سامانه، دکمهٔ زیر را بزن:",
                     reply_markup=_dashboard_markup(auth, token),
                 )
                 await request.app.state.bale.send_message(
-                    user.bale_chat_id, "منوی همیشگی صندوقچه:", reply_markup=main_menu_keyboard()
+                    user.bale_chat_id, "✅ آماده‌ام.", reply_markup=main_menu_keyboard()
                 )
                 return JSONResponse({"ok": True})
             if message.kind == "text" and message.text == "❓ راهنما":
                 session.commit()
                 await request.app.state.bale.send_message(
                     user.bale_chat_id,
-                    "هر فکر، کار، ایده یا یادآوری را به‌صورت متن یا ویس بفرست.\n"
-                    "از منوی پایین می‌توانی همیشه وارد سامانه یا گزارش امروز شوی.",
+                    "📘 راهنمای صندوقچه\n\n"
+                    "🎙 هر چیزی را با ویس یا متن بفرست؛ من آن را مرتب می‌کنم.\n"
+                    "✅ کار: «امروز گزارش پروژه را تمام کنم»\n"
+                    "💡 ایده: «ایده‌ای برای یک اپلیکیشن دارم»\n"
+                    "🗣 نظر: «به نظرم صندوقچه بهتر شده»\n"
+                    "🌿 احساس: «امروز از فشار کار خسته‌ام»\n"
+                    "⏰ یادآوری: «امروز ۵ دقیقه دیگر یادآوری کن» یا «فردا ساعت ۹ زنگ بزن»\n\n"
+                    "📅 تاریخ‌ها را شمسی بنویس؛ مثل «۲۵ مهر ساعت ۱۰:۳۰».\n"
+                    "از منوی پایین می‌توانی همیشه وارد سامانه، گزارش امروز یا یادآوری‌ها شوی.",
                     reply_markup=main_menu_keyboard(),
                 )
                 return JSONResponse({"ok": True})
@@ -180,10 +189,10 @@ def register_routes(app: FastAPI) -> None:
                         ).order_by(Reminder.due_at.asc()).limit(20)
                     )
                 )
-                content = "یادآوری‌های باز:\n" + "\n".join(
+                content = "⏰ یادآوری‌های باز:\n" + "\n".join(
                     f"• {item.text} — {format_persian_datetime(item.due_at, user.timezone)}"
                     for item in reminders
-                ) if reminders else "یادآوری بازی نداری."
+                ) if reminders else "✅ یادآوری بازی نداری."
                 session.commit()
                 await request.app.state.bale.send_message(
                     user.bale_chat_id, content, reply_markup=main_menu_keyboard()
@@ -204,11 +213,11 @@ def register_routes(app: FastAPI) -> None:
                     )
                 except Exception:
                     await request.app.state.bale.send_message(
-                        user.bale_chat_id, "ویرایش دریافت شد، اما پردازش آن کامل نشد."
+                        user.bale_chat_id, "⚠️ ویرایش دریافت شد، اما پردازش آن کامل نشد."
                     )
                 else:
                     await request.app.state.bale.send_message(
-                        user.bale_chat_id, "ثبت و دسته‌بندی دوباره انجام شد."
+                        user.bale_chat_id, "✅ ثبت و دسته‌بندی دوباره انجام شد."
                     )
                 return JSONResponse({"ok": True})
             existing = session.scalar(
@@ -233,12 +242,6 @@ def register_routes(app: FastAPI) -> None:
             )
             session.add(entry)
             session.flush()
-            auth = AuthService(
-                session,
-                request.app.state.settings.session_secret,
-                request.app.state.settings.app_base_url,
-            )
-            raw_token = auth.create_dashboard_token(user.id, _now())
             # Do not hold the insert transaction while AvalAI/Bale network
             # calls are running; concurrent webhook deliveries must remain
             # writable in SQLite.
@@ -255,25 +258,8 @@ def register_routes(app: FastAPI) -> None:
                 entry.status = "failed"
                 await request.app.state.bale.send_message(
                     user.bale_chat_id,
-                    "پیامت رسید، اما پردازش آن کامل نشد. در داشبورد می‌توانی متن خام را ببینی و دوباره تلاش کنی.",
+                    "⚠️ پیامت رسید، اما پردازش آن کامل نشد. در داشبورد می‌توانی متن خام را ببینی و دوباره تلاش کنی.",
                 )
-            await request.app.state.bale.send_message(
-                user.bale_chat_id,
-                "ثبت انجام شد. برای مشاهده و مدیریت صندوقچه، دکمهٔ داشبورد را بزن:",
-                reply_markup={
-                    "inline_keyboard": [
-                        [
-                            {
-                                "text": "📊 داشبورد شخصی",
-                                "url": auth.dashboard_url(raw_token),
-                            }
-                        ]
-                    ],
-                },
-            )
-            await request.app.state.bale.send_message(
-                user.bale_chat_id, "منوی همیشگی صندوقچه:", reply_markup=main_menu_keyboard()
-            )
         return JSONResponse({"ok": True})
 
     @app.get("/auth/claim/{token}")
@@ -372,6 +358,8 @@ def register_routes(app: FastAPI) -> None:
                 "icons": CATEGORY_ICONS,
                 "period": period,
                 "category": category,
+                "selected_label": CATEGORY_LABELS.get(category) if category else None,
+                "selected_icon": CATEGORY_ICONS.get(category) if category else None,
                 "now": _now(),
                 "today_count": today_count,
             },

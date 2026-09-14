@@ -62,9 +62,25 @@ def test_private_webhook_processes_message_and_dashboard_is_user_scoped(test_set
         assert response.status_code == 200
         assert response.json() == {"ok": True}
         assert any("ایدهٔ اپلیکیشن" in text for _, text in app.state.bale.messages)
+        assert all("داشبورد" not in text for _, text in app.state.bale.messages)
+        assert all("منوی همیشگی" not in text for _, text in app.state.bale.messages)
+        assert all("این مورد را ثبت کردم" not in text for _, text in app.state.bale.messages)
+        assert all(markup is None for markup in app.state.bale.markups)
+        start_response = client.post(
+            "/bale/webhook/test-webhook-secret",
+            json={
+                "update_id": 24,
+                "message": {
+                    "message_id": 12,
+                    "chat": {"id": 7001, "type": "private"},
+                    "from": {"id": 9001, "first_name": "آراز"},
+                    "text": "/start",
+                },
+            },
+        )
+        assert start_response.status_code == 200
         dashboard_markup = next(
-            markup
-            for markup in app.state.bale.markups
+            markup for markup in app.state.bale.markups
             if markup and any("url" in button for row in markup["inline_keyboard"] for button in row)
         )
         dashboard_url = next(
@@ -127,6 +143,7 @@ def test_start_and_dashboard_menu_always_offer_dashboard_button(test_settings):
         for markup in app.state.bale.markups
     )
     assert any(markup and "keyboard" in markup for markup in app.state.bale.markups)
+    assert all("منوی همیشگی" not in text for _, text in app.state.bale.messages)
 
 
 def test_webhook_secret_may_contain_slashes(test_settings):
