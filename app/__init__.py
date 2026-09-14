@@ -1,0 +1,1 @@
+"""Self Assistant application package."""
