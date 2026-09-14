@@ -99,6 +99,10 @@ class BaleClient:
             payload["reply_markup"] = reply_markup
         return await self._post("sendMessage", payload)
 
+    async def set_webhook(self, url: str) -> bool:
+        result = await self._post("setWebhook", {"url": url})
+        return result is True
+
     async def get_file(self, file_id: str) -> dict[str, Any]:
         return await self._post("getFile", {"file_id": file_id})
 

@@ -56,3 +56,22 @@ async def test_send_message_uses_bale_api():
     assert result["message_id"] == 2
     assert requests[0].url.path.endswith("/bottest-token/sendMessage")
     assert requests[0].content.decode() == '{"chat_id":123,"text":"سلام"}'
+
+
+@pytest.mark.asyncio
+async def test_set_webhook_uses_exact_configured_url():
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"ok": True, "result": True})
+
+    client = BaleClient("test-token", transport=httpx.MockTransport(handler))
+    result = await client.set_webhook("https://self.example/bale/webhook/exact-secret")
+    await client.close()
+
+    assert result is True
+    assert requests[0].url.path.endswith("/bottest-token/setWebhook")
+    assert requests[0].content.decode() == (
+        '{"url":"https://self.example/bale/webhook/exact-secret"}'
+    )

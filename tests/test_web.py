@@ -28,6 +28,11 @@ class FakeAI:
 class FakeBale:
     def __init__(self):
         self.messages = []
+        self.webhook_urls = []
+
+    async def set_webhook(self, url):
+        self.webhook_urls.append(url)
+        return True
 
     async def send_message(self, chat_id, text, reply_markup=None):
         self.messages.append((chat_id, text))
@@ -64,6 +69,9 @@ def test_private_webhook_processes_message_and_dashboard_is_user_scoped(test_set
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
         assert "ایدهٔ اپلیکیشن" in dashboard.text
+        assert app.state.bale.webhook_urls == [
+            "https://self.example/bale/webhook/test-webhook-secret"
+        ]
 
 
 def test_group_messages_are_ignored(test_settings):

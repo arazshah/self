@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -12,6 +13,8 @@ from app.config import Settings
 from app.db import init_db, make_engine
 from app.web import register_routes
 from app.worker import scheduler_loop
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -30,6 +33,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         error = getattr(app.state, "configuration_error", None)
         if error is not None:
             raise error
+        bale = getattr(app.state, "bale", None)
+        settings = getattr(app.state, "settings", None)
+        if bale is not None and settings is not None and hasattr(bale, "set_webhook"):
+            webhook_url = (
+                f"{settings.app_base_url.rstrip('/')}/bale/webhook/"
+                f"{settings.bale_webhook_secret}"
+            )
+            try:
+                await bale.set_webhook(webhook_url)
+                logger.info("Bale webhook configured for the application domain")
+            except Exception:
+                logger.exception("Bale webhook configuration failed")
         worker = asyncio.create_task(scheduler_loop(app))
         try:
             yield
