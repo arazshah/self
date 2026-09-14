@@ -1,3 +1,4 @@
+from dataclasses import replace
 
 from fastapi.testclient import TestClient
 
@@ -83,3 +84,24 @@ def test_group_messages_are_ignored(test_settings):
         )
         assert response.json() == {"ok": True}
         assert app.state.bale.messages == []
+
+
+def test_webhook_secret_may_contain_slashes(test_settings):
+    secret = "part-one/part-two/part-three"
+    app = create_app(replace(test_settings, bale_webhook_secret=secret))
+    app.state.ai = FakeAI()
+    app.state.bale = FakeBale()
+    with TestClient(app) as client:
+        response = client.post(
+            f"/bale/webhook/{secret}",
+            json={
+                "update_id": 22,
+                "message": {
+                    "message_id": 10,
+                    "chat": {"id": 7002, "type": "private"},
+                    "from": {"id": 9002, "first_name": "کاربر"},
+                    "text": "یک پیام آزمایشی",
+                },
+            },
+        )
+        assert response.status_code == 200

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI, Form, HTTPException, Request
@@ -50,9 +51,9 @@ def _render(request: Request, template: str, **context):
 
 
 def register_routes(app: FastAPI) -> None:
-    @app.post("/bale/webhook/{secret}")
+    @app.post("/bale/webhook/{secret:path}")
     async def bale_webhook(secret: str, request: Request):
-        if secret != request.app.state.settings.bale_webhook_secret:
+        if not hmac.compare_digest(secret, request.app.state.settings.bale_webhook_secret):
             raise HTTPException(status_code=404, detail="Not found")
         message = parse_private_update(await request.json())
         if message is None:
