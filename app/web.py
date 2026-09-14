@@ -2,21 +2,25 @@ from __future__ import annotations
 
 import hmac
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from app.auth import AuthService
-from app.bale import parse_private_update
+from app.bale import parse_callback_update, parse_private_update
 from app.db import session_scope
 from app.models import Entry, ExtractedRecord, Reminder, User
 from app.pipeline import process_entry
-from app.reports import CATEGORY_LABELS, build_digest
-from app.repositories import UserRepository
+from app.reports import CATEGORY_ICONS, CATEGORY_LABELS, build_digest, period_bounds
+from app.repositories import EntryRepository, UserRepository
+from app.services import reprocess_entry
+from app.time_utils import format_persian_datetime
 
 templates = Jinja2Templates(directory="app/templates")
+templates.env.globals["persian_datetime"] = format_persian_datetime
 
 
 def _now() -> datetime:
@@ -50,12 +54,73 @@ def _render(request: Request, template: str, **context):
     return templates.TemplateResponse(request=request, name=template, context=context)
 
 
+async def _answer_callback(bale, query_id: str, text: str) -> None:
+    answer = getattr(bale, "answer_callback_query", None)
+    if answer is not None:
+        await answer(query_id, text)
+
+
 def register_routes(app: FastAPI) -> None:
     @app.post("/bale/webhook/{secret:path}")
     async def bale_webhook(secret: str, request: Request):
         if not hmac.compare_digest(secret, request.app.state.settings.bale_webhook_secret):
             raise HTTPException(status_code=404, detail="Not found")
-        message = parse_private_update(await request.json())
+        payload = await request.json()
+        callback = parse_callback_update(payload)
+        if callback is not None:
+            parts = callback.data.split(":")
+            if len(parts) != 3 or not parts[2].isdigit():
+                await _answer_callback(request.app.state.bale, callback.query_id, "دستور نامعتبر است")
+                return {"ok": True}
+            kind, action, object_id = parts[0], parts[1], int(parts[2])
+            with session_scope(request.app.state.engine) as session:
+                user = session.scalar(select(User).where(User.bale_chat_id == callback.chat_id))
+                if user is None or (callback.user_id is not None and user.bale_user_id not in {None, callback.user_id}):
+                    await _answer_callback(request.app.state.bale, callback.query_id, "دسترسی مجاز نیست")
+                    return {"ok": True}
+                repository = EntryRepository(session)
+                if kind == "entry" and action == "edit":
+                    changed = repository.request_entry_edit(object_id, user.id)
+                    message = "متن اصلاح‌شدهٔ همین ثبت را در پیام بعدی بفرست."
+                elif kind == "entry" and action == "delete":
+                    changed = repository.soft_delete_entry(object_id, user.id)
+                    message = "ثبت حذف شد." if changed else "این ثبت پیدا نشد یا قبلاً حذف شده است."
+                elif kind == "reminder" and action in {"done", "cancel"}:
+                    changed = repository.update_reminder_status(
+                        object_id, user.id, "done" if action == "done" else "cancelled"
+                    )
+                    message = "یادآوری به‌روزرسانی شد." if changed else "یادآوری پیدا نشد."
+                elif kind == "reminder" and action == "tomorrow":
+                    reminder = session.scalar(
+                        select(Reminder).where(
+                            Reminder.id == object_id,
+                            Reminder.user_id == user.id,
+                            Reminder.deleted_at.is_(None),
+                        )
+                    )
+                    if reminder is None:
+                        changed = False
+                        message = "یادآوری پیدا نشد."
+                    else:
+                        local_due = reminder.due_at.replace(tzinfo=UTC).astimezone(ZoneInfo(user.timezone))
+                        changed = repository.snooze_reminder(
+                            object_id,
+                            user.id,
+                            (local_due + timedelta(days=1)).astimezone(UTC),
+                        )
+                        message = "یادآوری برای فردا تنظیم شد."
+                else:
+                    changed = False
+                    message = "این دکمه هنوز فعال نشده است."
+                if changed:
+                    session.commit()
+            await _answer_callback(request.app.state.bale, callback.query_id, message)
+            if kind == "entry" and action == "delete":
+                editor = getattr(request.app.state.bale, "edit_message_text", None)
+                if editor is not None:
+                    await editor(callback.chat_id, callback.message_id, message)
+            return {"ok": True}
+        message = parse_private_update(payload)
         if message is None:
             return {"ok": True}
 
@@ -63,6 +128,28 @@ def register_routes(app: FastAPI) -> None:
             user = UserRepository(session).get_or_create_by_bale_chat(
                 message.chat_id, message.display_name, message.user_id
             )
+            repository = EntryRepository(session)
+            pending = repository.pending_edit_entry(user.id) if message.kind == "text" else None
+            if pending is not None:
+                session.commit()
+                try:
+                    await reprocess_entry(
+                        session,
+                        pending.id,
+                        user,
+                        message.text or "",
+                        ai_client=request.app.state.ai,
+                        bale_client=request.app.state.bale,
+                    )
+                except Exception:
+                    await request.app.state.bale.send_message(
+                        user.bale_chat_id, "ویرایش دریافت شد، اما پردازش آن کامل نشد."
+                    )
+                else:
+                    await request.app.state.bale.send_message(
+                        user.bale_chat_id, "ثبت و دسته‌بندی دوباره انجام شد."
+                    )
+                return JSONResponse({"ok": True})
             existing = session.scalar(
                 select(Entry).where(
                     Entry.user_id == user.id,
@@ -111,7 +198,17 @@ def register_routes(app: FastAPI) -> None:
                 )
             await request.app.state.bale.send_message(
                 user.bale_chat_id,
-                f"لینک داشبورد شخصی‌ات (یک‌بارمصرف و تا ۱۰ دقیقه معتبر):\n{auth.dashboard_url(raw_token)}",
+                "ثبت انجام شد. برای مشاهده و مدیریت صندوقچه، دکمهٔ داشبورد را بزن:",
+                reply_markup={
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": "📊 داشبورد شخصی",
+                                "url": auth.dashboard_url(raw_token),
+                            }
+                        ]
+                    ]
+                },
             )
         return JSONResponse({"ok": True})
 
@@ -143,23 +240,41 @@ def register_routes(app: FastAPI) -> None:
         return templates.TemplateResponse(request=request, name="home.html", context={})
 
     @app.get("/dashboard", response_class=HTMLResponse)
-    async def dashboard(request: Request):
+    async def dashboard(
+        request: Request,
+        period: str = Query("all", pattern="^(all|today|week)$"),
+        category: str | None = Query(None),
+    ):
         user, _, csrf = _session_user(request)
         if user is None:
             return RedirectResponse("/", status_code=303)
         with session_scope(request.app.state.engine) as session:
-            records = list(
-                session.scalars(
-                    select(ExtractedRecord)
-                    .where(ExtractedRecord.user_id == user.id)
-                    .order_by(ExtractedRecord.created_at.desc())
-                    .limit(50)
+            record_query = (
+                select(ExtractedRecord)
+                .join(Entry, Entry.id == ExtractedRecord.entry_id)
+                .where(
+                    ExtractedRecord.user_id == user.id,
+                    ExtractedRecord.deleted_at.is_(None),
+                    Entry.deleted_at.is_(None),
                 )
             )
+            if category:
+                record_query = record_query.where(ExtractedRecord.category == category)
+            if period in {"today", "week"}:
+                start, end = period_bounds(_now(), user, "daily" if period == "today" else "weekly")
+                record_query = record_query.where(
+                    Entry.created_at >= start.replace(tzinfo=None),
+                    Entry.created_at < end.replace(tzinfo=None),
+                )
+            records = list(session.scalars(record_query.order_by(Entry.created_at.desc()).limit(100)))
             reminders = list(
                 session.scalars(
                     select(Reminder)
-                    .where(Reminder.user_id == user.id, Reminder.status == "pending")
+                    .where(
+                        Reminder.user_id == user.id,
+                        Reminder.status == "pending",
+                        Reminder.deleted_at.is_(None),
+                    )
                     .order_by(Reminder.due_at.asc())
                 )
             )
@@ -173,7 +288,11 @@ def register_routes(app: FastAPI) -> None:
                 "records": records,
                 "reminders": reminders,
                 "daily": daily,
+                "today_digest": build_digest(session, user, _now(), "daily"),
                 "labels": CATEGORY_LABELS,
+                "icons": CATEGORY_ICONS,
+                "period": period,
+                "category": category,
             },
         )
 
@@ -203,12 +322,124 @@ def register_routes(app: FastAPI) -> None:
             user_id = auth.get_session_user(session_id, _now())
             if user_id is None or not auth.verify_csrf(session_id, csrf, _now()):
                 raise HTTPException(status_code=403)
-            reminder = session.scalar(select(Reminder).where(Reminder.id == reminder_id, Reminder.user_id == user_id))
+            reminder = session.scalar(
+                select(Reminder).where(
+                    Reminder.id == reminder_id,
+                    Reminder.user_id == user_id,
+                    Reminder.deleted_at.is_(None),
+                )
+            )
             if reminder is None:
                 raise HTTPException(status_code=404)
-            if status not in {"done", "cancelled"}:
+            user = session.get(User, user_id)
+            if user is None:
+                raise HTTPException(status_code=404)
+            if status == "tomorrow":
+                local_due = reminder.due_at.replace(tzinfo=UTC).astimezone(ZoneInfo(user.timezone))
+                reminder.due_at = (local_due + timedelta(days=1)).astimezone(UTC)
+                reminder.snooze_until = reminder.due_at
+                reminder.delivered_at = None
+                reminder.status = "pending"
+            elif status in {"done", "cancelled"}:
+                reminder.status = status
+            else:
                 raise HTTPException(status_code=400)
-            reminder.status = status
+        return RedirectResponse("/dashboard", status_code=303)
+
+    @app.get("/settings", response_class=HTMLResponse)
+    async def settings_page(request: Request):
+        user, _, csrf = _session_user(request)
+        if user is None:
+            return RedirectResponse("/", status_code=303)
+        return templates.TemplateResponse(
+            request=request, name="settings.html", context={"user": user, "csrf": csrf or ""}
+        )
+
+    @app.post("/settings")
+    async def save_settings(
+        request: Request,
+        daily_digest_hour: int = Form(...),
+        timezone: str = Form(...),
+        csrf: str = Form(...),
+    ):
+        session_id = request.cookies.get("self_session")
+        if not session_id:
+            raise HTTPException(status_code=401)
+        if not 0 <= daily_digest_hour <= 23:
+            raise HTTPException(status_code=400, detail="ساعت نامعتبر است")
+        try:
+            ZoneInfo(timezone)
+        except Exception as error:
+            raise HTTPException(status_code=400, detail="منطقهٔ زمانی نامعتبر است") from error
+        with session_scope(request.app.state.engine) as session:
+            auth = AuthService(
+                session, request.app.state.settings.session_secret, request.app.state.settings.app_base_url
+            )
+            user_id = auth.get_session_user(session_id, _now())
+            if user_id is None or not auth.verify_csrf(session_id, csrf, _now()):
+                raise HTTPException(status_code=403)
+            user = session.get(User, user_id)
+            if user is None:
+                raise HTTPException(status_code=404)
+            user.daily_digest_hour = daily_digest_hour
+            user.timezone = timezone
+        return RedirectResponse("/dashboard", status_code=303)
+
+    @app.get("/entries/{entry_id}/edit", response_class=HTMLResponse)
+    async def edit_entry_page(request: Request, entry_id: int):
+        user, _, csrf = _session_user(request)
+        if user is None:
+            return RedirectResponse("/", status_code=303)
+        with session_scope(request.app.state.engine) as session:
+            entry = EntryRepository(session).get_owned_entry(entry_id, user.id)
+            if entry is None:
+                raise HTTPException(status_code=404)
+        return templates.TemplateResponse(
+            request=request,
+            name="edit_entry.html",
+            context={"user": user, "csrf": csrf or "", "entry": entry},
+        )
+
+    @app.post("/entries/{entry_id}/edit")
+    async def edit_entry(request: Request, entry_id: int, text: str = Form(...), csrf: str = Form(...)):
+        session_id = request.cookies.get("self_session")
+        if not session_id:
+            raise HTTPException(status_code=401)
+        with session_scope(request.app.state.engine) as session:
+            auth = AuthService(
+                session, request.app.state.settings.session_secret, request.app.state.settings.app_base_url
+            )
+            user_id = auth.get_session_user(session_id, _now())
+            if user_id is None or not auth.verify_csrf(session_id, csrf, _now()):
+                raise HTTPException(status_code=403)
+            user = session.get(User, user_id)
+            if user is None:
+                raise HTTPException(status_code=404)
+            session.commit()
+            await reprocess_entry(
+                session,
+                entry_id,
+                user,
+                text,
+                ai_client=request.app.state.ai,
+                bale_client=request.app.state.bale,
+            )
+        return RedirectResponse("/dashboard", status_code=303)
+
+    @app.post("/records/{record_id}/delete")
+    async def delete_record(request: Request, record_id: int, csrf: str = Form(...)):
+        session_id = request.cookies.get("self_session")
+        if not session_id:
+            raise HTTPException(status_code=401)
+        with session_scope(request.app.state.engine) as session:
+            auth = AuthService(
+                session, request.app.state.settings.session_secret, request.app.state.settings.app_base_url
+            )
+            user_id = auth.get_session_user(session_id, _now())
+            if user_id is None or not auth.verify_csrf(session_id, csrf, _now()):
+                raise HTTPException(status_code=403)
+            if not EntryRepository(session).soft_delete_record(record_id, user_id):
+                raise HTTPException(status_code=404)
         return RedirectResponse("/dashboard", status_code=303)
 
     @app.post("/logout")

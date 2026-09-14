@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Entry, ExtractedRecord, User
+from app.time_utils import PERSIAN_OUTPUT_DIGITS, format_persian_datetime
 
 CATEGORY_LABELS = {
     "task": "کار",
@@ -21,9 +22,14 @@ CATEGORY_LABELS = {
     "decision": "تصمیم",
     "reflection": "بازتاب و احساس",
 }
+CATEGORY_ICONS = {
+    "task": "✅", "reminder": "⏰", "follow_up": "📞", "finance": "💳",
+    "appointment": "📅", "project": "🧩", "idea": "💡", "errand": "🛒",
+    "decision": "⚖️", "reflection": "🌿",
+}
 
 
-def _period(now: datetime, user: User, kind: str) -> tuple[datetime, datetime]:
+def period_bounds(now: datetime, user: User, kind: str) -> tuple[datetime, datetime]:
     tz = ZoneInfo(user.timezone)
     local = now.astimezone(tz)
     local_day = local.date()
@@ -39,6 +45,9 @@ def _period(now: datetime, user: User, kind: str) -> tuple[datetime, datetime]:
     return start, end
 
 
+_period = period_bounds
+
+
 def _db_datetime(value: datetime) -> datetime:
     """SQLite stores DateTime values without timezone metadata."""
     return value.astimezone(UTC).replace(tzinfo=None)
@@ -47,7 +56,7 @@ def _db_datetime(value: datetime) -> datetime:
 def _solar(value: datetime, user: User) -> str:
     local = value.astimezone(ZoneInfo(user.timezone))
     date = jdatetime.date.fromgregorian(date=local.date())
-    return f"{date.year:04d}/{date.month:02d}/{date.day:02d}"
+    return f"{date.year:04d}/{date.month:02d}/{date.day:02d}".translate(PERSIAN_OUTPUT_DIGITS)
 
 
 def build_digest(session: Session, user: User, now: datetime, kind: str = "daily") -> str:
@@ -60,6 +69,8 @@ def build_digest(session: Session, user: User, now: datetime, kind: str = "daily
             .join(Entry, Entry.id == ExtractedRecord.entry_id)
             .where(
                 ExtractedRecord.user_id == user.id,
+                ExtractedRecord.deleted_at.is_(None),
+                Entry.deleted_at.is_(None),
                 Entry.created_at >= _db_datetime(start),
                 Entry.created_at < _db_datetime(end),
             )
@@ -77,10 +88,12 @@ def build_digest(session: Session, user: User, now: datetime, kind: str = "daily
         grouped.setdefault(record.category, []).append(record)
     lines.append(f"تعداد موارد ثبت‌شده: {len(records)}")
     for category, items in grouped.items():
-        lines.append(f"\n{CATEGORY_LABELS.get(category, category)}:")
+        lines.append(f"\n{CATEGORY_ICONS.get(category, '•')} {CATEGORY_LABELS.get(category, category)}:")
         for item in items:
             detail = f" — {item.body}" if item.body else ""
-            lines.append(f"• {item.title}{detail}")
+            entry_time = session.scalar(select(Entry.created_at).where(Entry.id == item.entry_id))
+            stamp = f" ({format_persian_datetime(entry_time, user.timezone)})" if entry_time else ""
+            lines.append(f"• {item.title}{detail}{stamp}")
 
     reflections = grouped.get("reflection", [])
     if reflections:

@@ -13,7 +13,7 @@ def test_init_db_adds_v2_columns_to_existing_database(tmp_path):
     init_db(engine)
 
     for table, expected in {
-        "entries": {"revision", "deleted_at"},
+        "entries": {"revision", "awaiting_edit", "deleted_at"},
         "extracted_records": {"deleted_at"},
         "reminders": {"deleted_at"},
     }.items():

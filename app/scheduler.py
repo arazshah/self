@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.bale import reminder_keyboard
 from app.models import Reminder, User
 
 
@@ -28,6 +29,7 @@ async def run_scheduler_once(
             .join(User, User.id == Reminder.user_id)
             .where(
                 Reminder.status == "pending",
+                Reminder.deleted_at.is_(None),
                 Reminder.due_at <= current,
                 (Reminder.snooze_until.is_(None) | (Reminder.snooze_until <= current)),
             )
@@ -47,7 +49,16 @@ async def run_scheduler_once(
         session.flush()
         session.commit()
         try:
-            await notifier.send_message(user.bale_chat_id, f"یادآوری: {reminder.text}")
+            try:
+                await notifier.send_message(
+                    user.bale_chat_id,
+                    f"یادآوری: {reminder.text}",
+                    reply_markup=reminder_keyboard(reminder.id),
+                )
+            except TypeError as error:
+                if "reply_markup" not in str(error):
+                    raise
+                await notifier.send_message(user.bale_chat_id, f"یادآوری: {reminder.text}")
         except Exception:
             reminder.status = "pending"
             session.commit()

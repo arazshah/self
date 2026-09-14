@@ -89,8 +89,28 @@ class EntryRepository:
         entry.status = "received"
         entry.processed_at = None
         entry.revision += 1
+        entry.awaiting_edit = False
         self.session.flush()
         return entry
+
+    def request_entry_edit(self, entry_id: int, user_id: int) -> bool:
+        entry = self.get_owned_entry(entry_id, user_id)
+        if entry is None:
+            return False
+        entry.awaiting_edit = True
+        self.session.flush()
+        return True
+
+    def pending_edit_entry(self, user_id: int) -> Entry | None:
+        return self.session.scalar(
+            select(Entry)
+            .where(
+                Entry.user_id == user_id,
+                Entry.awaiting_edit.is_(True),
+                Entry.deleted_at.is_(None),
+            )
+            .order_by(Entry.created_at.desc())
+        )
 
     def soft_delete_entry(self, entry_id: int, user_id: int) -> bool:
         entry = self.get_owned_entry(entry_id, user_id)
@@ -143,6 +163,41 @@ class EntryRepository:
         if reminder is None:
             return False
         reminder.deleted_at = datetime.now(UTC)
+        self.session.flush()
+        return True
+
+    def update_reminder_status(self, reminder_id: int, user_id: int, status: str) -> bool:
+        if status not in {"done", "cancelled", "pending"}:
+            raise ValueError("وضعیت یادآوری نامعتبر است")
+        reminder = self.session.scalar(
+            select(Reminder).where(
+                Reminder.id == reminder_id,
+                Reminder.user_id == user_id,
+                Reminder.deleted_at.is_(None),
+            )
+        )
+        if reminder is None:
+            return False
+        reminder.status = status
+        if status == "pending":
+            reminder.delivered_at = None
+        self.session.flush()
+        return True
+
+    def snooze_reminder(self, reminder_id: int, user_id: int, due_at: datetime) -> bool:
+        reminder = self.session.scalar(
+            select(Reminder).where(
+                Reminder.id == reminder_id,
+                Reminder.user_id == user_id,
+                Reminder.deleted_at.is_(None),
+            )
+        )
+        if reminder is None:
+            return False
+        reminder.status = "pending"
+        reminder.due_at = due_at.astimezone(UTC)
+        reminder.snooze_until = reminder.due_at
+        reminder.delivered_at = None
         self.session.flush()
         return True
 

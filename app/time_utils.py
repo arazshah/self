@@ -65,6 +65,25 @@ def _solar_date_string(year: int, month: int, day: int) -> str:
     return f"{year:04d}/{month:02d}/{day:02d}".translate(PERSIAN_OUTPUT_DIGITS)
 
 
+def _aware(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
+
+
+def format_persian_date(value: datetime, timezone_name: str = "Asia/Tehran") -> str:
+    local = _aware(value).astimezone(ZoneInfo(timezone_name))
+    solar = jdatetime.date.fromgregorian(date=local.date())
+    return _solar_date_string(solar.year, solar.month, solar.day)
+
+
+def format_persian_time(value: datetime, timezone_name: str = "Asia/Tehran") -> str:
+    local = _aware(value).astimezone(ZoneInfo(timezone_name))
+    return f"{local.hour:02d}:{local.minute:02d}".translate(PERSIAN_OUTPUT_DIGITS)
+
+
+def format_persian_datetime(value: datetime, timezone_name: str = "Asia/Tehran") -> str:
+    return f"{format_persian_date(value, timezone_name)}، {format_persian_time(value, timezone_name)}"
+
+
 def resolve_persian_datetime(text: str, now: datetime, timezone_name: str) -> ResolvedDate:
     raw = text
     normalized = _normalize(text)

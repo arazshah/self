@@ -1,7 +1,12 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from app.time_utils import resolve_persian_datetime
+from app.time_utils import (
+    format_persian_date,
+    format_persian_datetime,
+    format_persian_time,
+    resolve_persian_datetime,
+)
 
 TEHRAN = ZoneInfo("Asia/Tehran")
 
@@ -31,3 +36,11 @@ def test_ambiguous_expression_requires_confirmation():
 
     assert result.needs_confirmation is True
     assert result.value is None
+
+
+def test_formats_utc_timestamp_as_persian_date_and_time():
+    value = datetime(2026, 9, 14, 5, 30, tzinfo=UTC)
+
+    assert format_persian_date(value, "Asia/Tehran") == "۱۴۰۵/۰۶/۲۳"
+    assert format_persian_time(value, "Asia/Tehran") == "۰۹:۰۰"
+    assert format_persian_datetime(value, "Asia/Tehran") == "۱۴۰۵/۰۶/۲۳، ۰۹:۰۰"

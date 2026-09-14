@@ -5,6 +5,7 @@ from typing import Protocol
 
 from sqlalchemy.orm import Session
 
+from app.bale import entry_keyboard
 from app.models import Entry, ExtractedRecord, Reminder, User, utc_now
 from app.schemas import ExtractedItem, ExtractionResult
 from app.time_utils import resolve_persian_datetime
@@ -33,6 +34,19 @@ class PipelineBale(Protocol):
     async def download_file(self, file_path: str) -> bytes: ...
 
     async def send_message(self, chat_id: int, text: str, reply_markup: dict | None = None) -> dict: ...
+
+
+async def _send_with_optional_keyboard(
+    bale_client: PipelineBale, chat_id: int, text: str, keyboard: dict
+) -> None:
+    try:
+        await bale_client.send_message(chat_id, text, reply_markup=keyboard)
+    except TypeError as error:
+        # Keep compatibility with lightweight integrations written before
+        # inline keyboards were introduced.
+        if "reply_markup" not in str(error):
+            raise
+        await bale_client.send_message(chat_id, text)
 
 
 def _due_date(item: ExtractedItem, now: datetime, timezone_name: str):
@@ -77,7 +91,7 @@ async def process_entry(
         raise ValueError("متن پیام برای پردازش وجود ندارد")
 
     extraction = await ai_client.extract(transcript, processing_now, user.timezone)
-    outgoing_messages: list[str] = []
+    outgoing_messages: list[tuple[str, dict]] = []
     for item in extraction.items:
         due_at, solar_date = _due_date(item, processing_now, user.timezone)
         ambiguous = bool(item.due_raw and due_at is None)
@@ -108,10 +122,13 @@ async def process_entry(
             )
 
         outgoing_messages.append(
-            _confirmation_text(
+            (
+                _confirmation_text(
                 item,
                 item.due_raw,
                 extraction.clarification if ambiguous else None,
+                ),
+                entry_keyboard(entry.id),
             )
         )
 
@@ -129,7 +146,10 @@ async def process_entry(
             )
         )
         outgoing_messages.append(
-            f"برداشت ثبت‌شده از حالت: {extraction.reflection_summary}"
+            (
+                f"برداشت ثبت‌شده از حالت: {extraction.reflection_summary}",
+                entry_keyboard(entry.id),
+            )
         )
 
     entry.status = "processed"
@@ -138,6 +158,6 @@ async def process_entry(
     # Commit all local state before waiting on Bale. Otherwise SQLite keeps a
     # write lock while a network request is in flight.
     session.commit()
-    for message in outgoing_messages:
-        await bale_client.send_message(user.bale_chat_id, message)
+    for message, keyboard in outgoing_messages:
+        await _send_with_optional_keyboard(bale_client, user.bale_chat_id, message, keyboard)
     return extraction

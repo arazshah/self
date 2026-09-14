@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from app.bale import BaleClient, parse_private_update
+from app.bale import BaleClient, entry_keyboard, parse_callback_update, parse_private_update
 
 
 def test_parse_private_voice_update():
@@ -39,6 +39,28 @@ def test_group_update_is_ignored():
         )
         is None
     )
+
+
+def test_parse_callback_and_build_entry_keyboard():
+    callback = parse_callback_update(
+        {
+            "callback_query": {
+                "id": "query-1",
+                "from": {"id": 42},
+                "data": "entry:edit:7",
+                "message": {
+                    "message_id": 99,
+                    "chat": {"id": 42, "type": "private"},
+                },
+            }
+        }
+    )
+
+    assert callback is not None
+    assert callback.data == "entry:edit:7"
+    keyboard = entry_keyboard(7, "https://self.example/dashboard")
+    assert keyboard["inline_keyboard"][0][0]["callback_data"] == "entry:edit:7"
+    assert keyboard["inline_keyboard"][1][0]["url"].endswith("/dashboard")
 
 
 @pytest.mark.asyncio

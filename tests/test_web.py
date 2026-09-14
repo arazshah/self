@@ -28,6 +28,7 @@ class FakeAI:
 class FakeBale:
     def __init__(self):
         self.messages = []
+        self.markups = []
         self.webhook_urls = []
 
     async def set_webhook(self, url):
@@ -36,6 +37,7 @@ class FakeBale:
 
     async def send_message(self, chat_id, text, reply_markup=None):
         self.messages.append((chat_id, text))
+        self.markups.append(reply_markup)
         return {"ok": True}
 
 
@@ -60,10 +62,18 @@ def test_private_webhook_processes_message_and_dashboard_is_user_scoped(test_set
         assert response.status_code == 200
         assert response.json() == {"ok": True}
         assert any("ایدهٔ اپلیکیشن" in text for _, text in app.state.bale.messages)
-        dashboard_message = next(
-            text for _, text in app.state.bale.messages if "/auth/claim/" in text
+        dashboard_markup = next(
+            markup
+            for markup in app.state.bale.markups
+            if markup and any("url" in button for row in markup["inline_keyboard"] for button in row)
         )
-        token = dashboard_message.rsplit("/", 1)[-1]
+        dashboard_url = next(
+            button["url"]
+            for row in dashboard_markup["inline_keyboard"]
+            for button in row
+            if "url" in button
+        )
+        token = dashboard_url.rsplit("/", 1)[-1]
         claim = client.get(f"/auth/claim/{token}", follow_redirects=False)
         assert claim.status_code == 303
         dashboard = client.get("/dashboard")

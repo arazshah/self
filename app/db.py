@@ -36,6 +36,7 @@ def _migrate_existing_schema(engine) -> None:
     additions = {
         "entries": {
             "revision": "INTEGER NOT NULL DEFAULT 1",
+            "awaiting_edit": "BOOLEAN NOT NULL DEFAULT 0",
             "deleted_at": "DATETIME",
         },
         "extracted_records": {"deleted_at": "DATETIME"},
