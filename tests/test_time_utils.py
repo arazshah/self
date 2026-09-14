@@ -74,3 +74,21 @@ def test_resolves_persian_ezafe_next_week_and_written_minutes():
     assert result.solar_date == "۱۴۰۵/۰۶/۳۱"
     assert result.value.astimezone(TEHRAN).hour == 10
     assert result.value.astimezone(TEHRAN).minute == 30
+
+
+def test_resolves_relative_minutes_from_current_local_time():
+    now = datetime(2026, 9, 15, 10, 20, 45, tzinfo=TEHRAN)
+    result = resolve_persian_datetime("امروز ۵ دقیقه دیگه بهم یادآوری کن", now, "Asia/Tehran")
+    due = result.value.astimezone(TEHRAN)
+    assert due.date() == now.date()
+    assert due.hour == 10
+    assert due.minute == 25
+
+
+def test_resolves_relative_half_hour():
+    now = datetime(2026, 9, 15, 23, 50, tzinfo=TEHRAN)
+    result = resolve_persian_datetime("نیم ساعت دیگه یادآوری کن", now, "Asia/Tehran")
+    due = result.value.astimezone(TEHRAN)
+    assert due.date().isoformat() == "2026-09-16"
+    assert due.hour == 0
+    assert due.minute == 20

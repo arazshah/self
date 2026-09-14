@@ -236,6 +236,30 @@ async def test_pipeline_prefers_natural_language_due_raw_over_model_due_at(sessi
 
 
 @pytest.mark.asyncio
+async def test_pipeline_uses_original_text_when_model_drops_relative_time(session):
+    user = UserRepository(session).get_or_create_by_bale_chat(108, "کاربر پنج دقیقه")
+    text = "امروز ۵ دقیقه دیگه بهم یادآوری کن و بگو سلام"
+    entry = EntryRepository(session).create(user.id, text, datetime(2026, 9, 15, 6, 20, tzinfo=UTC), 17)
+
+    class TruncatedTimeAI(FakeAI):
+        async def extract(self, text, now, timezone_name):
+            result = await super().extract(text, now, timezone_name)
+            result.items[0].due_raw = "امروز"
+            result.items[0].due_at = None
+            result.items[0].title = "سلام"
+            result.items[0].body = "سلام"
+            return result
+
+    await process_entry(
+        session, entry, user, ai_client=TruncatedTimeAI(), bale_client=FakeBale(),
+        now=datetime(2026, 9, 15, 5, 50, tzinfo=UTC)
+    )
+    reminder = session.query(Reminder).one()
+    stored_due = reminder.due_at.replace(tzinfo=UTC).astimezone(TEHRAN)
+    assert (stored_due.hour, stored_due.minute) == (9, 25)
+
+
+@pytest.mark.asyncio
 async def test_pipeline_does_not_create_mood_summary_for_an_opinion(session):
     user = UserRepository(session).get_or_create_by_bale_chat(107, "کاربر نظر")
     text = "به نظرم صندوقچه نرم افزار بهتری شده."

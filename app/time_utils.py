@@ -68,6 +68,19 @@ def _time(text: str) -> tuple[int, int]:
     return hour, minute
 
 
+def _relative_duration(text: str, local_now: datetime) -> datetime | None:
+    minute_match = re.search(r"(\d+)\s*دقیقه\s*(?:دیگه|دیگر|بعد)", text)
+    if minute_match:
+        return local_now + timedelta(minutes=int(minute_match.group(1)))
+    if re.search(r"نیم\s*ساعت\s*(?:دیگه|دیگر|بعد)", text):
+        return local_now + timedelta(minutes=30)
+    hour_match = re.search(r"(?:یک|یک\s*ساعت|\d+\s*ساعت)\s*(?:دیگه|دیگر|بعد)", text)
+    if hour_match:
+        amount = re.search(r"\d+", hour_match.group(0))
+        return local_now + timedelta(hours=int(amount.group()) if amount else 1)
+    return None
+
+
 def _solar_to_utc(year: int, month: int, day: int, hour: int, minute: int, tz: ZoneInfo):
     gregorian = jdatetime.datetime(year, month, day, hour, minute).togregorian()
     return gregorian.replace(tzinfo=tz).astimezone(UTC)
@@ -102,6 +115,14 @@ def resolve_persian_datetime(text: str, now: datetime, timezone_name: str) -> Re
     tz = ZoneInfo(timezone_name)
     local_now = now.astimezone(tz)
     solar_now = jdatetime.date.fromgregorian(date=local_now.date())
+    relative = _relative_duration(normalized, local_now)
+    if relative is not None:
+        solar = jdatetime.date.fromgregorian(date=relative.date())
+        return ResolvedDate(
+            raw=raw,
+            value=relative.astimezone(UTC),
+            solar_date=_solar_date_string(solar.year, solar.month, solar.day),
+        )
     hour, minute = _time(normalized)
 
     if "بعداً" in text or "بعدا" in normalized or "وقتی فرصت" in normalized:

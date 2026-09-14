@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -50,9 +51,17 @@ async def _send_with_optional_keyboard(
         await bale_client.send_message(chat_id, text)
 
 
-def _due_date(item: ExtractedItem, now: datetime, timezone_name: str):
-    if item.due_raw:
-        resolved = resolve_persian_datetime(item.due_raw, now, timezone_name)
+def _due_date(
+    item: ExtractedItem, now: datetime, timezone_name: str, source_text: str | None = None
+):
+    source = item.evidence or source_text
+    candidates = [item.due_raw] if item.due_raw else []
+    if source and re.search(r"(?:ساعت|دقیقه|نیم\s*ساعت)", source) and not (
+        item.due_raw and re.search(r"(?:ساعت|دقیقه|نیم\s*ساعت)", item.due_raw)
+    ):
+        candidates.insert(0, source)
+    for candidate in candidates:
+        resolved = resolve_persian_datetime(candidate, now, timezone_name)
         if resolved.value is not None:
             return resolved.value, resolved.solar_date
     if item.due_at is not None:
@@ -99,7 +108,7 @@ async def process_entry(
     extraction = normalize_extraction(extraction, transcript)
     outgoing_messages: list[tuple[str, dict]] = []
     for item in extraction.items:
-        due_at, solar_date = _due_date(item, processing_now, user.timezone)
+        due_at, solar_date = _due_date(item, processing_now, user.timezone, transcript)
         ambiguous = bool(item.due_raw and due_at is None)
         needs_confirmation = item.needs_confirmation or ambiguous
         record = ExtractedRecord(
