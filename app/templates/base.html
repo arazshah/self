@@ -1,20 +1,26 @@
 <!doctype html>
 <html lang="fa" dir="rtl">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}صندوقچه{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}صندوقچه{% endblock %}</title><link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <main class="shell">
-    <header class="topbar">
-      <a class="brand" href="/dashboard">صندوقچه</a>
-      {% if user %}
-      <nav class="top-actions"><a href="/settings">⚙️ تنظیمات</a><form action="/logout" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link-button">خروج</button></form></nav>
-      {% endif %}
-    </header>
-    {% block content %}{% endblock %}
-  </main>
+  <div class="app-shell">
+    {% if user %}
+    <aside class="sidebar">
+      <a class="brand" href="/dashboard"><span class="brand-mark">ص</span><span><b>صندوقچه</b><small>دستیار شخصی تو</small></span></a>
+      <nav class="side-nav" aria-label="منوی اصلی">
+        <a class="nav-item active" href="/dashboard">⌂ <span>نمای کلی</span></a>
+        <a class="nav-item" href="/dashboard?period=today">◷ <span>امروز</span></a>
+        <a class="nav-item" href="/dashboard?period=week">▦ <span>این هفته</span></a>
+        <a class="nav-item" href="/dashboard#reminders">♧ <span>یادآوری‌ها</span></a>
+        <a class="nav-item" href="/reports/daily">◌ <span>گزارش‌ها</span></a>
+        <a class="nav-item" href="/dashboard#categories">◈ <span>دسته‌بندی‌ها</span></a>
+      </nav>
+      <div class="sidebar-bottom"><a class="nav-item" href="/settings">⚙ <span>تنظیمات</span></a><form action="/logout" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="nav-item nav-button">↪ <span>خروج</span></button></form></div>
+    </aside>
+    {% endif %}
+    <main class="content"><header class="mobile-header"><a class="brand" href="/dashboard"><span class="brand-mark">ص</span><b>صندوقچه</b></a>{% if user %}<a href="/settings" class="icon-link">⚙</a>{% endif %}</header>{% block content %}{% endblock %}</main>
+  </div>
 </body>
 </html>

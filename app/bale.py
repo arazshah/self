@@ -72,6 +72,17 @@ def reminder_keyboard(reminder_id: int) -> dict[str, Any]:
     }
 
 
+def main_menu_keyboard() -> dict[str, Any]:
+    return {
+        "keyboard": [
+            [{"text": "📊 ورود به سامانه"}, {"text": "📅 امروز"}],
+            [{"text": "⏰ یادآوری‌ها"}, {"text": "❓ راهنما"}],
+        ],
+        "resize_keyboard": True,
+        "is_persistent": True,
+    }
+
+
 def parse_private_update(payload: dict[str, Any]) -> IncomingMessage | None:
     message = payload.get("message")
     if not isinstance(message, dict):

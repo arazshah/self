@@ -104,6 +104,31 @@ def test_group_messages_are_ignored(test_settings):
         assert app.state.bale.messages == []
 
 
+def test_start_and_dashboard_menu_always_offer_dashboard_button(test_settings):
+    app = create_app(test_settings)
+    app.state.ai = FakeAI()
+    app.state.bale = FakeBale()
+    with TestClient(app) as client:
+        response = client.post(
+            "/bale/webhook/test-webhook-secret",
+            json={
+                "update_id": 23,
+                "message": {
+                    "message_id": 11,
+                    "chat": {"id": 7010, "type": "private"},
+                    "from": {"id": 9010, "first_name": "کاربر"},
+                    "text": "/start",
+                },
+            },
+        )
+    assert response.status_code == 200
+    assert any(
+        markup and any("url" in button for row in markup["inline_keyboard"] for button in row)
+        for markup in app.state.bale.markups
+    )
+    assert any(markup and "keyboard" in markup for markup in app.state.bale.markups)
+
+
 def test_webhook_secret_may_contain_slashes(test_settings):
     secret = "part-one/part-two/part-three"
     app = create_app(replace(test_settings, bale_webhook_secret=secret))

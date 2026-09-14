@@ -1,7 +1,13 @@
 import httpx
 import pytest
 
-from app.bale import BaleClient, entry_keyboard, parse_callback_update, parse_private_update
+from app.bale import (
+    BaleClient,
+    entry_keyboard,
+    main_menu_keyboard,
+    parse_callback_update,
+    parse_private_update,
+)
 
 
 def test_parse_private_voice_update():
@@ -61,6 +67,15 @@ def test_parse_callback_and_build_entry_keyboard():
     keyboard = entry_keyboard(7, "https://self.example/dashboard")
     assert keyboard["inline_keyboard"][0][0]["callback_data"] == "entry:edit:7"
     assert keyboard["inline_keyboard"][1][0]["url"].endswith("/dashboard")
+
+
+def test_main_menu_contains_dashboard_and_daily_actions():
+    menu = main_menu_keyboard()
+    labels = [button["text"] for row in menu["keyboard"] for button in row]
+    assert "📊 ورود به سامانه" in labels
+    assert "📅 امروز" in labels
+    assert "⏰ یادآوری‌ها" in labels
+    assert menu["resize_keyboard"] is True
 
 
 @pytest.mark.asyncio

@@ -10,17 +10,18 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from app.auth import AuthService
-from app.bale import parse_callback_update, parse_private_update
+from app.bale import main_menu_keyboard, parse_callback_update, parse_private_update
 from app.db import session_scope
 from app.models import Entry, ExtractedRecord, Reminder, User
 from app.pipeline import process_entry
 from app.reports import CATEGORY_ICONS, CATEGORY_LABELS, build_digest, period_bounds
 from app.repositories import EntryRepository, UserRepository
 from app.services import reprocess_entry
-from app.time_utils import format_persian_datetime
+from app.time_utils import format_persian_date, format_persian_datetime
 
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["persian_datetime"] = format_persian_datetime
+templates.env.globals["persian_date"] = format_persian_date
 
 
 def _now() -> datetime:
@@ -58,6 +59,12 @@ async def _answer_callback(bale, query_id: str, text: str) -> None:
     answer = getattr(bale, "answer_callback_query", None)
     if answer is not None:
         await answer(query_id, text)
+
+
+def _dashboard_markup(auth: AuthService, token: str) -> dict:
+    return {
+        "inline_keyboard": [[{"text": "📊 ورود به سامانه", "url": auth.dashboard_url(token)}]]
+    }
 
 
 def register_routes(app: FastAPI) -> None:
@@ -128,6 +135,60 @@ def register_routes(app: FastAPI) -> None:
             user = UserRepository(session).get_or_create_by_bale_chat(
                 message.chat_id, message.display_name, message.user_id
             )
+            if message.kind == "text" and message.text in {
+                "/start", "📊 ورود به سامانه", "ورود به سامانه"
+            }:
+                auth = AuthService(
+                    session,
+                    request.app.state.settings.session_secret,
+                    request.app.state.settings.app_base_url,
+                )
+                token = auth.create_dashboard_token(user.id, _now())
+                session.commit()
+                await request.app.state.bale.send_message(
+                    user.bale_chat_id,
+                    "منوی صندوقچه آماده است. برای ورود، دکمهٔ زیر را بزن:",
+                    reply_markup=_dashboard_markup(auth, token),
+                )
+                await request.app.state.bale.send_message(
+                    user.bale_chat_id, "منوی همیشگی صندوقچه:", reply_markup=main_menu_keyboard()
+                )
+                return JSONResponse({"ok": True})
+            if message.kind == "text" and message.text == "❓ راهنما":
+                session.commit()
+                await request.app.state.bale.send_message(
+                    user.bale_chat_id,
+                    "هر فکر، کار، ایده یا یادآوری را به‌صورت متن یا ویس بفرست.\n"
+                    "از منوی پایین می‌توانی همیشه وارد سامانه یا گزارش امروز شوی.",
+                    reply_markup=main_menu_keyboard(),
+                )
+                return JSONResponse({"ok": True})
+            if message.kind == "text" and message.text == "📅 امروز":
+                content = build_digest(session, user, _now(), "daily")
+                session.commit()
+                await request.app.state.bale.send_message(
+                    user.bale_chat_id, content, reply_markup=main_menu_keyboard()
+                )
+                return JSONResponse({"ok": True})
+            if message.kind == "text" and message.text == "⏰ یادآوری‌ها":
+                reminders = list(
+                    session.scalars(
+                        select(Reminder).where(
+                            Reminder.user_id == user.id,
+                            Reminder.status == "pending",
+                            Reminder.deleted_at.is_(None),
+                        ).order_by(Reminder.due_at.asc()).limit(20)
+                    )
+                )
+                content = "یادآوری‌های باز:\n" + "\n".join(
+                    f"• {item.text} — {format_persian_datetime(item.due_at, user.timezone)}"
+                    for item in reminders
+                ) if reminders else "یادآوری بازی نداری."
+                session.commit()
+                await request.app.state.bale.send_message(
+                    user.bale_chat_id, content, reply_markup=main_menu_keyboard()
+                )
+                return JSONResponse({"ok": True})
             repository = EntryRepository(session)
             pending = repository.pending_edit_entry(user.id) if message.kind == "text" else None
             if pending is not None:
@@ -207,8 +268,11 @@ def register_routes(app: FastAPI) -> None:
                                 "url": auth.dashboard_url(raw_token),
                             }
                         ]
-                    ]
+                    ],
                 },
+            )
+            await request.app.state.bale.send_message(
+                user.bale_chat_id, "منوی همیشگی صندوقچه:", reply_markup=main_menu_keyboard()
             )
         return JSONResponse({"ok": True})
 
@@ -267,6 +331,21 @@ def register_routes(app: FastAPI) -> None:
                     Entry.created_at < end.replace(tzinfo=None),
                 )
             records = list(session.scalars(record_query.order_by(Entry.created_at.desc()).limit(100)))
+            today_start, today_end = period_bounds(_now(), user, "daily")
+            today_id = session.scalar(
+                select(ExtractedRecord.id)
+                .join(Entry, Entry.id == ExtractedRecord.entry_id)
+                .where(
+                    ExtractedRecord.user_id == user.id,
+                    ExtractedRecord.deleted_at.is_(None),
+                    Entry.deleted_at.is_(None),
+                    Entry.created_at >= today_start.replace(tzinfo=None),
+                    Entry.created_at < today_end.replace(tzinfo=None),
+                )
+                .order_by(ExtractedRecord.id.desc())
+                .limit(1)
+            )
+            today_count = 1 if today_id is not None else 0
             reminders = list(
                 session.scalars(
                     select(Reminder)
@@ -293,6 +372,8 @@ def register_routes(app: FastAPI) -> None:
                 "icons": CATEGORY_ICONS,
                 "period": period,
                 "category": category,
+                "now": _now(),
+                "today_count": today_count,
             },
         )
 
