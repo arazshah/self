@@ -344,9 +344,26 @@ def register_routes(app: FastAPI) -> None:
                 )
             )
             daily = build_digest(session, user, _now() - timedelta(days=1), "daily")
+        standalone = request.url.path != "/dashboard"
+        page_title = (
+            CATEGORY_LABELS.get(category)
+            if category
+            else "ثبت‌های امروز"
+            if period == "today"
+            else "ثبت‌های این هفته"
+            if period == "week"
+            else "نمای کلی"
+        )
+        page_kicker = "دسته‌بندی" if category else "نمایش ثبت‌ها"
+        page_description = (
+            f"تمام ثبت‌های دستهٔ {CATEGORY_LABELS[category]} را با زمان ثبت ببین."
+            if category
+            else "ثبت‌های خودت را بر اساس بازهٔ زمانی مرور و مدیریت کن."
+        )
+        active_path = f"/categories/{category}" if category else "/" + period if period != "all" else "/dashboard"
         return templates.TemplateResponse(
             request=request,
-            name="dashboard.html",
+            name="records.html" if standalone else "dashboard.html",
             context={
                 "user": user,
                 "csrf": csrf or "",
@@ -362,6 +379,48 @@ def register_routes(app: FastAPI) -> None:
                 "selected_icon": CATEGORY_ICONS.get(category) if category else None,
                 "now": _now(),
                 "today_count": today_count,
+                "active_path": active_path,
+                "page_title": page_title,
+                "page_kicker": page_kicker,
+                "page_description": page_description,
+            },
+        )
+
+    @app.get("/today", response_class=HTMLResponse)
+    async def today(request: Request):
+        return await dashboard(request, period="today", category=None)
+
+    @app.get("/week", response_class=HTMLResponse)
+    async def week(request: Request):
+        return await dashboard(request, period="week", category=None)
+
+    @app.get("/categories/{category}", response_class=HTMLResponse)
+    async def category_page(request: Request, category: str):
+        if category not in CATEGORY_LABELS:
+            raise HTTPException(status_code=404, detail="دسته‌بندی پیدا نشد")
+        return await dashboard(request, period="all", category=category)
+
+    @app.get("/reminders", response_class=HTMLResponse)
+    async def reminders_page(request: Request):
+        user, _, csrf = _session_user(request)
+        if user is None:
+            return RedirectResponse("/", status_code=303)
+        with session_scope(request.app.state.engine) as session:
+            reminders = list(
+                session.scalars(
+                    select(Reminder)
+                    .where(Reminder.user_id == user.id, Reminder.deleted_at.is_(None))
+                    .order_by(Reminder.status.asc(), Reminder.due_at.asc())
+                )
+            )
+        return templates.TemplateResponse(
+            request=request,
+            name="reminders.html",
+            context={
+                "user": user,
+                "csrf": csrf or "",
+                "reminders": reminders,
+                "active_path": "/reminders",
             },
         )
 

@@ -41,6 +41,25 @@ class FakeBale:
         return {"ok": True}
 
 
+def _login_from_bale_start(client, bale, *, chat_id=7700):
+    response = client.post(
+        "/bale/webhook/test-webhook-secret",
+        json={
+            "update_id": 90,
+            "message": {
+                "message_id": 90,
+                "chat": {"id": chat_id, "type": "private"},
+                "from": {"id": chat_id + 1, "first_name": "کاربر"},
+                "text": "/start",
+            },
+        },
+    )
+    assert response.status_code == 200
+    markup = next(item for item in bale.markups if item and "inline_keyboard" in item)
+    url = markup["inline_keyboard"][0][0]["url"]
+    return client.get(url.replace("https://self.example", ""), follow_redirects=False)
+
+
 def test_private_webhook_processes_message_and_dashboard_is_user_scoped(test_settings):
     app = create_app(test_settings)
     app.state.ai = FakeAI()
@@ -165,3 +184,34 @@ def test_webhook_secret_may_contain_slashes(test_settings):
             },
         )
         assert response.status_code == 200
+
+
+def test_workspace_pages_are_independent_and_user_scoped(test_settings):
+    app = create_app(test_settings)
+    app.state.ai = FakeAI()
+    app.state.bale = FakeBale()
+    with TestClient(app) as client:
+        assert client.get("/today", follow_redirects=False).status_code == 303
+        assert client.get("/week", follow_redirects=False).status_code == 303
+        assert client.get("/reminders", follow_redirects=False).status_code == 303
+        assert client.get("/categories/idea", follow_redirects=False).status_code == 303
+
+        _login_from_bale_start(client, app.state.bale)
+        for path in ("/today", "/week", "/reminders", "/categories/idea"):
+            page = client.get(path)
+            assert page.status_code == 200
+            assert "نمای کلی" in page.text
+
+
+def test_overview_links_to_independent_workspace_pages(test_settings):
+    app = create_app(test_settings)
+    app.state.ai = FakeAI()
+    app.state.bale = FakeBale()
+    with TestClient(app) as client:
+        _login_from_bale_start(client, app.state.bale, chat_id=7701)
+        page = client.get("/dashboard")
+        assert page.status_code == 200
+        assert 'href="/today"' in page.text
+        assert 'href="/week"' in page.text
+        assert 'href="/reminders"' in page.text
+        assert "stat-card" not in page.text
