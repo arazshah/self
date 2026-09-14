@@ -3,7 +3,8 @@ import json
 import httpx
 import pytest
 
-from app.ai import AIProviderError, AvalAIClient
+from app.ai import AIProviderError, AvalAIClient, normalize_extraction
+from app.schemas import ExtractedItem, ExtractionResult
 
 
 @pytest.mark.asyncio
@@ -84,3 +85,23 @@ async def test_avalai_non_object_output_is_rejected_safely():
     with pytest.raises(AIProviderError, match="ساختار"):
         await client.extract("متن", "2026-09-14T08:00:00+00:00", "Asia/Tehran")
     await client.close()
+
+
+def test_opinion_is_not_reported_as_emotion():
+    transcript = "به نظرم صندوقچه من نرم افزار بهتری شده."
+    result = ExtractionResult(
+        items=[
+            ExtractedItem(
+                category="reflection", title="نظر درباره نرم‌افزار", evidence=transcript,
+                confidence=0.9,
+            )
+        ],
+        reflection_summary="نظر مثبت درباره صندوقچه",
+        suggestion="استراحت کن",
+    )
+
+    normalized = normalize_extraction(result, transcript)
+
+    assert normalized.items[0].category == "opinion"
+    assert normalized.reflection_summary is None
+    assert normalized.suggestion is None

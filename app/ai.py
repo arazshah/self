@@ -30,7 +30,7 @@ EXTRACTION_SCHEMA = {
                         "enum": [
                             "task", "reminder", "follow_up", "finance",
                             "appointment", "project", "idea", "errand",
-                            "decision", "reflection",
+                            "decision", "opinion", "reflection",
                         ],
                     },
                     "title": {"type": "string"},
@@ -98,6 +98,9 @@ class AvalAIClient:
         instructions = (
             "تو یک استخراج‌کنندهٔ دقیق برای دستیار شخصی فارسی هستی. "
             "فقط اطلاعاتی را که کاربر گفته استخراج کن. تاریخ شمسی را در due_raw نگه دار؛ "
+            "نظر، نقد، ترجیح و مقایسهٔ کاربر دربارهٔ یک محصول یا ایده را با category=opinion ثبت کن، نه reflection. "
+            "reflection فقط برای احساس یا حال شخصیِ صریح خود کاربر است؛ "
+            "برای opinion هیچ پیشنهاد درمانی یا حال‌وهوایی نساز. "
             "عبارت‌های امروز، فردا، این هفته، هفته آینده و نام روزهای هفته را دقیقاً در due_raw حفظ کن. "
             "برای زمان‌های نسبی و فارسی، due_at را محاسبه نکن و null بگذار؛ محاسبهٔ زمان با سامانه است. "
             "از حدس‌زدن تاریخ یا ساعت خودداری کن؛ اگر عبارت مبهم است needs_confirmation=true بگذار. "
@@ -134,7 +137,8 @@ class AvalAIClient:
             if body.get("status") == "incomplete":
                 raise AIProviderError("پاسخ AvalAI ناقص است")
             output_text = self._output_text(body)
-            return ExtractionResult.model_validate(json.loads(output_text))
+            result = ExtractionResult.model_validate(json.loads(output_text))
+            return normalize_extraction(result, transcript)
         except AIProviderError:
             raise
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError) as exc:
@@ -154,3 +158,21 @@ class AvalAIClient:
         if not chunks:
             raise AIProviderError("پاسخ ساختاریافته از AvalAI دریافت نشد")
         return "".join(chunks)
+
+
+OPINION_MARKERS = ("به نظرم", "به نظر من", "نظر من", "فکر می‌کنم", "فکر میکنم", "بهتر", "بدتر")
+EMOTION_MARKERS = ("حالم", "احساس می‌کنم", "احساس میکنم", "غمگین", "خوشحالم", "عصبانی", "نگران")
+
+
+def normalize_extraction(result: ExtractionResult, transcript: str) -> ExtractionResult:
+    """Prevent comparative opinions from becoming duplicated mood reflections."""
+    has_opinion = any(marker in transcript for marker in OPINION_MARKERS)
+    has_emotion = any(marker in transcript for marker in EMOTION_MARKERS)
+    if not has_opinion or has_emotion:
+        return result
+    items = [
+        item.model_copy(update={"category": "opinion"})
+        if item.category == "reflection" else item
+        for item in result.items
+    ]
+    return result.model_copy(update={"items": items, "reflection_summary": None, "suggestion": None})

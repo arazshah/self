@@ -20,12 +20,14 @@ CATEGORY_LABELS = {
     "idea": "ایده",
     "errand": "کار بیرون",
     "decision": "تصمیم",
+    "opinion": "نظر",
     "reflection": "بازتاب و احساس",
 }
 CATEGORY_ICONS = {
     "task": "✅", "reminder": "⏰", "follow_up": "📞", "finance": "💳",
     "appointment": "📅", "project": "🧩", "idea": "💡", "errand": "🛒",
     "decision": "⚖️", "reflection": "🌿",
+    "opinion": "🗣️",
 }
 
 

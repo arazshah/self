@@ -233,3 +233,26 @@ async def test_pipeline_prefers_natural_language_due_raw_over_model_due_at(sessi
     stored_due = reminder.due_at.replace(tzinfo=UTC)
     assert stored_due.astimezone(TEHRAN).date().isoformat() == "2026-09-15"
     assert stored_due.astimezone(TEHRAN).hour == 9
+
+
+@pytest.mark.asyncio
+async def test_pipeline_does_not_create_mood_summary_for_an_opinion(session):
+    user = UserRepository(session).get_or_create_by_bale_chat(107, "کاربر نظر")
+    text = "به نظرم صندوقچه نرم افزار بهتری شده."
+    entry = EntryRepository(session).create(user.id, text, datetime(2026, 9, 14, 5, tzinfo=UTC), 16)
+
+    class OpinionAI(FakeAI):
+        async def extract(self, text, now, timezone_name):
+            return ExtractionResult(
+                items=[ExtractedItem(category="reflection", title="مقایسه نرم‌افزارها", evidence=text, confidence=0.8)],
+                reflection_summary="صندوقچه بهتر است",
+                suggestion="استراحت کن",
+            )
+
+    await process_entry(
+        session, entry, user, ai_client=OpinionAI(), bale_client=FakeBale(),
+        now=datetime(2026, 9, 14, 5, tzinfo=UTC)
+    )
+    records = session.query(ExtractedRecord).all()
+    assert len(records) == 1
+    assert records[0].category == "opinion"

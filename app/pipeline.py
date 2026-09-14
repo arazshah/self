@@ -5,6 +5,7 @@ from typing import Protocol
 
 from sqlalchemy.orm import Session
 
+from app.ai import normalize_extraction
 from app.bale import entry_keyboard
 from app.models import Entry, ExtractedRecord, Reminder, User, utc_now
 from app.schemas import ExtractedItem, ExtractionResult
@@ -95,6 +96,7 @@ async def process_entry(
         raise ValueError("متن پیام برای پردازش وجود ندارد")
 
     extraction = await ai_client.extract(transcript, processing_now, user.timezone)
+    extraction = normalize_extraction(extraction, transcript)
     outgoing_messages: list[tuple[str, dict]] = []
     for item in extraction.items:
         due_at, solar_date = _due_date(item, processing_now, user.timezone)

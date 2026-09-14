@@ -15,6 +15,7 @@ Category = Literal[
     "idea",
     "errand",
     "decision",
+    "opinion",
     "reflection",
 ]
 
