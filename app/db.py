@@ -28,6 +28,30 @@ def _configure_sqlite(dbapi_connection, _connection_record) -> None:
 
 def init_db(engine) -> None:
     Base.metadata.create_all(engine)
+    _migrate_existing_schema(engine)
+
+
+def _migrate_existing_schema(engine) -> None:
+    """Add columns introduced after the first release without replacing data."""
+    additions = {
+        "entries": {
+            "revision": "INTEGER NOT NULL DEFAULT 1",
+            "deleted_at": "DATETIME",
+        },
+        "extracted_records": {"deleted_at": "DATETIME"},
+        "reminders": {"deleted_at": "DATETIME"},
+    }
+    with engine.begin() as connection:
+        for table, columns in additions.items():
+            existing = {
+                row[1]
+                for row in connection.exec_driver_sql(f"PRAGMA table_info({table})")
+            }
+            for column, definition in columns.items():
+                if column not in existing:
+                    connection.exec_driver_sql(
+                        f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+                    )
 
 
 @contextmanager

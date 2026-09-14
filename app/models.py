@@ -46,6 +46,8 @@ class Entry(Base):
     status: Mapped[str] = mapped_column(String(32), default="received")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ExtractedRecord(Base):
@@ -65,6 +67,7 @@ class ExtractedRecord(Base):
     confidence: Mapped[float] = mapped_column(default=0.0)
     status: Mapped[str] = mapped_column(String(32), default="needs_confirmation")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Reminder(Base):
@@ -80,6 +83,7 @@ class Reminder(Base):
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     snooze_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Digest(Base):
