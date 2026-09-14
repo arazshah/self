@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}داشبورد صندوقچه{% endblock %}
+{% block content %}
+<section class="welcome">
+  <p class="eyebrow">داشبورد شخصی {{ user.display_name }}</p>
+  <h1>دیروز چه گذشت؟</h1>
+  <div class="actions"><a class="button" href="/reports/daily">گزارش روزانه</a><a class="button secondary" href="/reports/weekly">جمع هفتگی</a></div>
+</section>
+<section class="grid">
+  <article class="card digest"><h2>نمای سریع</h2><pre>{{ daily }}</pre></article>
+  <article class="card"><h2>یادآوری‌های باز</h2>{% if reminders %}<ul class="items">{% for reminder in reminders %}<li><span>{{ reminder.text }}</span><small>{{ reminder.due_at }}</small><form action="/reminders/{{ reminder.id }}/status" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="status" value="done"><button class="tiny">انجام شد</button></form></li>{% endfor %}</ul>{% else %}<p class="muted">یادآوری بازی نداری.</p>{% endif %}</article>
+</section>
+<section class="card"><h2>موارد اخیر</h2>{% if records %}<div class="record-list">{% for record in records %}<article class="record"><div><span class="tag">{{ labels.get(record.category, record.category) }}</span><strong>{{ record.title }}</strong></div><p>{{ record.body or record.evidence or "" }}</p>{% if record.due_raw %}<small>زمان گفته‌شده: {{ record.due_raw }}</small>{% endif %}</article>{% endfor %}</div>{% else %}<p class="muted">هنوز پیامی ثبت نشده است.</p>{% endif %}</section>
+{% endblock %}
