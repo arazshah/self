@@ -44,3 +44,33 @@ def test_formats_utc_timestamp_as_persian_date_and_time():
     assert format_persian_date(value, "Asia/Tehran") == "۱۴۰۵/۰۶/۲۳"
     assert format_persian_time(value, "Asia/Tehran") == "۰۹:۰۰"
     assert format_persian_datetime(value, "Asia/Tehran") == "۱۴۰۵/۰۶/۲۳، ۰۹:۰۰"
+
+
+def test_resolves_this_week_weekday_without_matching_saturday_substring():
+    now = datetime(2026, 9, 14, 8, tzinfo=TEHRAN)  # Monday / دوشنبه
+    result = resolve_persian_datetime("این هفته سه شنبه ساعت ۱۵", now, "Asia/Tehran")
+    assert result.solar_date == "۱۴۰۵/۰۶/۲۴"
+    assert result.value.astimezone(TEHRAN).hour == 15
+
+
+def test_resolves_next_week_weekday():
+    now = datetime(2026, 9, 14, 8, tzinfo=TEHRAN)
+    result = resolve_persian_datetime("هفته آینده سه شنبه ساعت ۱۵", now, "Asia/Tehran")
+    assert result.solar_date == "۱۴۰۵/۰۶/۳۱"
+
+
+def test_resolves_spoken_half_hour():
+    now = datetime(2026, 9, 14, 8, tzinfo=TEHRAN)
+    result = resolve_persian_datetime("فردا ساعت ده و نیم", now, "Asia/Tehran")
+    assert result.value.astimezone(TEHRAN).hour == 10
+    assert result.value.astimezone(TEHRAN).minute == 30
+
+
+def test_resolves_persian_ezafe_next_week_and_written_minutes():
+    now = datetime(2026, 9, 14, 8, tzinfo=TEHRAN)
+    result = resolve_persian_datetime(
+        "هفتهٔ آینده سه‌شنبه ساعت ۱۰ و ۳۰ دقیقه", now, "Asia/Tehran"
+    )
+    assert result.solar_date == "۱۴۰۵/۰۶/۳۱"
+    assert result.value.astimezone(TEHRAN).hour == 10
+    assert result.value.astimezone(TEHRAN).minute == 30

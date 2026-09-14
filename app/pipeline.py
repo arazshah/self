@@ -50,6 +50,10 @@ async def _send_with_optional_keyboard(
 
 
 def _due_date(item: ExtractedItem, now: datetime, timezone_name: str):
+    if item.due_raw:
+        resolved = resolve_persian_datetime(item.due_raw, now, timezone_name)
+        if resolved.value is not None:
+            return resolved.value, resolved.solar_date
     if item.due_at is not None:
         value = item.due_at
         if value.tzinfo is None:

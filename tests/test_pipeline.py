@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -6,6 +7,8 @@ from app.models import ExtractedRecord, Reminder
 from app.pipeline import process_entry
 from app.repositories import EntryRepository, UserRepository
 from app.schemas import ExtractedItem, ExtractionResult
+
+TEHRAN = ZoneInfo("Asia/Tehran")
 
 
 class FakeAI:
@@ -207,3 +210,26 @@ async def test_process_entry_transcribes_voice_without_persisting_audio(session)
 
     assert entry.transcript == "فردا ساعت ۹ قبض برق را پرداخت کنم"
     assert entry.audio_path == "file-voice"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_prefers_natural_language_due_raw_over_model_due_at(session):
+    user = UserRepository(session).get_or_create_by_bale_chat(106, "کاربر زمان")
+    entry = EntryRepository(session).create(
+        user.id, "فردا ساعت ۹ قبض برق را پرداخت کنم", datetime(2026, 9, 14, 5, tzinfo=UTC), 15
+    )
+
+    class WrongDateAI(FakeAI):
+        async def extract(self, text, now, timezone_name):
+            result = await super().extract(text, now, timezone_name)
+            result.items[0].due_at = datetime(2030, 1, 1, tzinfo=UTC)
+            return result
+
+    await process_entry(
+        session, entry, user, ai_client=WrongDateAI(), bale_client=FakeBale(),
+        now=datetime(2026, 9, 14, 5, tzinfo=UTC)
+    )
+    reminder = session.query(Reminder).one()
+    stored_due = reminder.due_at.replace(tzinfo=UTC)
+    assert stored_due.astimezone(TEHRAN).date().isoformat() == "2026-09-15"
+    assert stored_due.astimezone(TEHRAN).hour == 9

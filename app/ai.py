@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
 from app.schemas import ExtractionResult
+from app.time_utils import format_persian_datetime
 
 
 class AIProviderError(RuntimeError):
@@ -96,14 +98,22 @@ class AvalAIClient:
         instructions = (
             "تو یک استخراج‌کنندهٔ دقیق برای دستیار شخصی فارسی هستی. "
             "فقط اطلاعاتی را که کاربر گفته استخراج کن. تاریخ شمسی را در due_raw نگه دار؛ "
+            "عبارت‌های امروز، فردا، این هفته، هفته آینده و نام روزهای هفته را دقیقاً در due_raw حفظ کن. "
+            "برای زمان‌های نسبی و فارسی، due_at را محاسبه نکن و null بگذار؛ محاسبهٔ زمان با سامانه است. "
+            "از حدس‌زدن تاریخ یا ساعت خودداری کن؛ اگر عبارت مبهم است needs_confirmation=true بگذار. "
             "اگر مبهم است needs_confirmation=true بگذار. احساسات را خوداظهاری ثبت کن، "
             "تشخیص پزشکی نده. هیچ عملیات خارجی پیشنهاد نده. خروجی فقط JSON مطابق schema باشد."
         )
+        current = datetime.fromisoformat(now) if isinstance(now, str) else now
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=UTC)
+        local_now = current.astimezone(ZoneInfo(timezone_name))
         payload = {
             "model": self.text_model,
             "instructions": instructions,
             "input": (
                 f"زمان فعلی UTC: {now}\nمنطقه زمانی کاربر: {timezone_name}\n"
+                f"زمان فعلی محلی کاربر: {format_persian_datetime(local_now, timezone_name)}\n"
                 f"متن کاربر:\n{transcript}"
             ),
             "text": {

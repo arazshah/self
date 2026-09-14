@@ -52,6 +52,10 @@ async def test_avalai_transcribes_and_extracts_structured_items():
     assert transcript == "فردا قبض برق را پرداخت کنم"
     assert result.items[0].category == "finance"
     assert len(calls) == 2
+    extraction_request = calls[1]
+    assert "due_raw" in extraction_request.content.decode()
+    assert "due_at" in extraction_request.content.decode()
+    assert "محاسبهٔ زمان" in extraction_request.content.decode()
 
 
 @pytest.mark.asyncio

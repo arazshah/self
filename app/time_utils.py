@@ -31,6 +31,13 @@ WEEKDAYS = {
     "پنجشنبه": 3,
     "جمعه": 4,
 }
+HOUR_WORDS = {
+    "یک": 1, "دو": 2, "سه": 3, "چهار": 4, "پنج": 5, "شش": 6,
+    "هفت": 7, "هشت": 8, "نه": 9, "ده": 10, "یازده": 11, "دوازده": 12,
+    "سیزده": 13, "چهارده": 14, "پانزده": 15, "شانزده": 16,
+    "هفده": 17, "هجده": 18, "نوزده": 19, "بیست": 20,
+    "بیست و یک": 21, "بیست و دو": 22, "بیست و سه": 23,
+}
 PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
 PERSIAN_OUTPUT_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
 
@@ -47,10 +54,15 @@ def _normalize(text: str) -> str:
 
 
 def _time(text: str) -> tuple[int, int]:
-    match = re.search(r"ساعت\s*(\d{1,2})(?::(\d{1,2}))?", text)
+    words = "|".join(re.escape(word) for word in sorted(HOUR_WORDS, key=len, reverse=True))
+    match = re.search(
+        rf"ساعت\s*(\d{{1,2}}|{words})(?:(?:\s*[:：]\s*|\s*و\s*)(\d{{1,2}})(?:\s*دقیقه)?)?",
+        text,
+    )
     if not match:
         return 9, 0
-    hour, minute = int(match.group(1)), int(match.group(2) or 0)
+    hour = int(match.group(1)) if match.group(1).isdigit() else HOUR_WORDS[match.group(1)]
+    minute = int(match.group(2) or (30 if re.search(r"\sو\s*نیم", text[match.end():]) else 0))
     if hour > 23 or minute > 59:
         raise ValueError("زمان نامعتبر است")
     return hour, minute
@@ -111,9 +123,15 @@ def resolve_persian_datetime(text: str, now: datetime, timezone_name: str) -> Re
                 solar_date=_solar_date_string(solar.year, solar.month, solar.day),
             )
 
-    for name, weekday in WEEKDAYS.items():
-        if name in normalized:
-            delta = (weekday - local_now.weekday()) % 7 or 7
+    compact = normalized.replace(" ", "")
+    next_week = "هفتهآینده" in compact or "هفتهبعد" in compact
+    for name, weekday in sorted(WEEKDAYS.items(), key=lambda item: len(item[0]), reverse=True):
+        if name in compact:
+            delta = (weekday - local_now.weekday()) % 7
+            if next_week:
+                delta += 7
+            elif delta == 0:
+                delta = 7
             local_value = (local_now + timedelta(days=delta)).replace(
                 hour=hour, minute=minute, second=0, microsecond=0
             )
