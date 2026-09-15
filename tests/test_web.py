@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.db import session_scope
 from app.main import create_app
-from app.models import Entry, ExtractedRecord, User
+from app.models import Entry, ExtractedRecord, Reminder, User
 from app.schemas import ExtractedItem, ExtractionResult
 
 
@@ -43,6 +43,84 @@ class FakeBale:
         self.messages.append((chat_id, text))
         self.markups.append(reply_markup)
         return {"ok": True}
+
+
+class EditAI(FakeAI):
+    async def extract(self, transcript, now, timezone_name):
+        return ExtractionResult(items=[ExtractedItem(
+            category="reminder", title="تماس با علی", evidence=transcript,
+            due_raw="فردا", confidence=0.9, needs_confirmation=True,
+        )])
+
+
+def test_bale_time_edit_keeps_subject_and_does_not_claim_false_success(test_settings):
+    app = create_app(test_settings)
+    app.state.ai = EditAI()
+    app.state.bale = FakeBale()
+    with TestClient(app) as client:
+        with session_scope(app.state.engine) as session:
+            user = User(bale_chat_id=8101, bale_user_id=8102, display_name="آراز")
+            session.add(user)
+            session.flush()
+            entry = Entry(
+                user_id=user.id, source_message_id=91,
+                transcript="فردا یادآوری کن به علی زنگ بزنم",
+                raw_text="فردا یادآوری کن به علی زنگ بزنم",
+                awaiting_edit=True,
+            )
+            session.add(entry)
+            session.flush()
+            entry_id = entry.id
+            session.add(ExtractedRecord(
+                user_id=user.id, entry_id=entry.id, category="reminder",
+                title="تماس با علی", due_raw="فردا", status="needs_confirmation",
+            ))
+
+        def send_edit(message_id, text):
+            result = client.post("/bale/webhook/test-webhook-secret", json={
+                "update_id": message_id,
+                "message": {
+                    "message_id": message_id,
+                    "chat": {"id": 8101, "type": "private"},
+                    "from": {"id": 8102, "first_name": "آراز"},
+                    "text": text,
+                },
+            })
+            assert result.status_code == 200
+
+        send_edit(92, "فردا")
+        assert len(app.state.bale.messages) == 1
+        assert "ساعت" in app.state.bale.messages[-1][1]
+        assert all("ثبت و دسته‌بندی دوباره انجام شد" not in message for _, message in app.state.bale.messages)
+
+        with session_scope(app.state.engine) as session:
+            entry = session.get(Entry, entry_id)
+            entry.awaiting_edit = True
+
+        send_edit(93, "فردا ساعت ۱۰")
+        assert len(app.state.bale.messages) == 2
+        assert "✅ ثبت شد" in app.state.bale.messages[-1][1]
+        assert "تماس با علی" in app.state.bale.messages[-1][1]
+        assert "زمان فهمیده‌شده" in app.state.bale.messages[-1][1]
+        assert all("ثبت و دسته‌بندی دوباره انجام شد" not in message for _, message in app.state.bale.messages)
+        with session_scope(app.state.engine) as session:
+            entry = session.get(Entry, entry_id)
+            assert "تماس با علی" in entry.transcript
+            reminders = list(session.scalars(select(Reminder).where(Reminder.user_id == user.id,
+                                                             Reminder.deleted_at.is_(None))))
+            assert len(reminders) == 1
+
+        with session_scope(app.state.engine) as session:
+            session.get(Entry, entry_id).awaiting_edit = True
+        send_edit(94, "هفته آینده سه‌شنبه ساعت ۱۰")
+        with session_scope(app.state.engine) as session:
+            assert "تماس با علی" in session.get(Entry, entry_id).transcript
+
+        with session_scope(app.state.engine) as session:
+            session.get(Entry, entry_id).awaiting_edit = True
+        send_edit(95, "هفته آینده سه‌شنبه ساعت ۱۰ به رضا زنگ بزنم")
+        with session_scope(app.state.engine) as session:
+            assert session.get(Entry, entry_id).transcript == "هفته آینده سه‌شنبه ساعت ۱۰ به رضا زنگ بزنم"
 
 
 def _login_from_bale_start(client, bale, *, chat_id=7700):

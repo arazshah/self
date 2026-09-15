@@ -16,7 +16,7 @@ from app.models import Entry, ExtractedRecord, Reminder, User
 from app.pipeline import process_entry
 from app.reports import CATEGORY_ICONS, CATEGORY_LABELS, build_digest, period_bounds
 from app.repositories import EntryRepository, UserRepository
-from app.services import reprocess_entry
+from app.services import compose_bale_edit_text, reprocess_entry
 from app.time_utils import format_persian_date, format_persian_datetime
 
 templates = Jinja2Templates(directory="app/templates")
@@ -90,7 +90,10 @@ def register_routes(app: FastAPI) -> None:
                 repository = EntryRepository(session)
                 if kind == "entry" and action == "edit":
                     changed = repository.request_entry_edit(object_id, user.id)
-                    message = "✏️ متن اصلاح‌شدهٔ همین ثبت را در پیام بعدی بفرست."
+                    message = (
+                        "✏️ متن کاملِ موضوع و روز و ساعت دقیق را در پیام بعدی بفرست؛ "
+                        "اگر فقط زمان را اصلاح می‌کنی، همان زمان را بفرست، مثل «فردا ساعت ۱۰:۳۰»."
+                    )
                 elif kind == "entry" and action == "delete":
                     changed = repository.soft_delete_entry(object_id, user.id)
                     message = "🗑 ثبت حذف شد." if changed else "⚠️ این ثبت پیدا نشد یا قبلاً حذف شده است."
@@ -209,17 +212,13 @@ def register_routes(app: FastAPI) -> None:
                         session,
                         pending.id,
                         user,
-                        message.text or "",
+                        compose_bale_edit_text(session, pending, user, message.text or ""),
                         ai_client=request.app.state.ai,
                         bale_client=request.app.state.bale,
                     )
                 except Exception:
                     await request.app.state.bale.send_message(
                         user.bale_chat_id, "⚠️ ویرایش دریافت شد، اما پردازش آن کامل نشد."
-                    )
-                else:
-                    await request.app.state.bale.send_message(
-                        user.bale_chat_id, "✅ ثبت و دسته‌بندی دوباره انجام شد."
                     )
                 return JSONResponse({"ok": True})
             existing = session.scalar(

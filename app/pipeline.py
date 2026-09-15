@@ -90,7 +90,11 @@ def _confirmation_text(
 ) -> str:
     category = f"{CATEGORY_ICONS.get(item.category, '📝')} {CATEGORY_LABELS.get(item.category, item.category)}"
     if clarification:
-        return f"⚠️ {category}: {item.title}\nیادآوری زمان‌بندی نشد. {clarification}\n✏️ متن و زمان را در سامانه اصلاح کن."
+        return (
+            f"⚠️ {category}: {item.title}\n"
+            f"زمان‌بندی این مورد انجام نشد. {clarification}\n"
+            "✏️ دکمهٔ «اصلاح زمان» را بزن و روز و ساعت دقیق را بفرست."
+        )
     suffix = f"\n📅 زمان فهمیده‌شده: {format_persian_datetime(due_at, timezone_name)}" if due_at else ""
     return f"✅ ثبت شد\n{category}: {item.title}{suffix}"
 
@@ -132,15 +136,13 @@ async def process_entry(
             resolved.needs_confirmation or expired_during_processing
             or (item.category == "reminder" and due_at is None)
         )
-        needs_confirmation = item.needs_confirmation or ambiguous
+        needs_confirmation = ambiguous or (item.needs_confirmation and due_at is None)
         clarification = (
             "زمان یادآوری هنگام پردازش گذشته است؛ تاریخ و ساعت آینده را مشخص کن."
             if expired_during_processing else resolved.clarification
         )
         if clarification is None and item.category == "reminder" and due_at is None:
             clarification = "روز و ساعت یادآوری مشخص نیست؛ هر دو را واضح بگو."
-        if item.needs_confirmation and due_at is not None:
-            clarification = "زمان استخراج‌شده نیاز به بررسی دارد؛ متن و زمان را اصلاح کن."
         record = ExtractedRecord(
             user_id=user.id,
             entry_id=entry.id,
