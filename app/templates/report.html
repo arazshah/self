@@ -1,5 +1,9 @@
 {% extends "base.html" %}
-{% block title %}گزارش صندوقچه{% endblock %}
+{% block title %}{% if kind == 'daily' %}گزارش روزانه{% else %}گزارش هفتگی{% endif %} · صندوقچه{% endblock %}
 {% block content %}
-<article class="card report"><pre>{{ content }}</pre><a class="button secondary" href="/dashboard">بازگشت به داشبورد</a></article>
+<header class="page-head"><div><span class="overline">مرور صندوقچه</span><h1>{% if kind == 'daily' %}گزارش روزانه{% else %}گزارش هفتگی{% endif %}</h1><p>{% if kind == 'daily' %}خلاصهٔ روز گذشته و ثبت‌های امروز تا همین لحظه.{% else %}خلاصهٔ کامل هفتهٔ گذشته از همهٔ دسته‌ها و فعالیت‌ها.{% endif %}</p></div><a class="primary-action" href="/dashboard">نمای کلی ←</a></header>
+<section class="report-stack">
+  <article class="panel report-card"><div class="panel-head"><div><span class="panel-kicker">بازهٔ تکمیل‌شده</span><h2>🗓 {% if kind == 'daily' %}روز گذشته{% else %}هفتهٔ گذشته{% endif %}</h2></div></div><pre>{{ content }}</pre></article>
+  {% if today_content %}<article class="panel report-card current-report"><div class="panel-head"><div><span class="panel-kicker">در حال تکمیل</span><h2>☀ ثبت‌های امروز تا این لحظه</h2></div><a href="/today">مشاهدهٔ فهرست ←</a></div><pre>{{ today_content }}</pre></article>{% endif %}
+</section>
 {% endblock %}

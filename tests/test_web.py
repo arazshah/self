@@ -1,8 +1,12 @@
 from dataclasses import replace
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
+from app.db import session_scope
 from app.main import create_app
+from app.models import Entry, ExtractedRecord, User
 from app.schemas import ExtractedItem, ExtractionResult
 
 
@@ -215,3 +219,36 @@ def test_overview_links_to_independent_workspace_pages(test_settings):
         assert 'href="/week"' in page.text
         assert 'href="/reminders"' in page.text
         assert "stat-card" not in page.text
+
+
+def test_daily_report_page_also_shows_today_entries(test_settings):
+    app = create_app(test_settings)
+    app.state.ai = FakeAI()
+    app.state.bale = FakeBale()
+    with TestClient(app) as client:
+        _login_from_bale_start(client, app.state.bale, chat_id=7702)
+        with session_scope(app.state.engine) as session:
+            user = session.scalar(select(User).where(User.bale_chat_id == 7702))
+            entry = Entry(
+                user_id=user.id,
+                source_message_id=7002,
+                transcript="ثبت امروز",
+                created_at=datetime.now(UTC),
+            )
+            session.add(entry)
+            session.flush()
+            session.add(
+                ExtractedRecord(
+                    user_id=user.id,
+                    entry_id=entry.id,
+                    category="task",
+                    title="کار ثبت‌شده امروز",
+                    evidence="ثبت امروز",
+                    confidence=1.0,
+                    status="confirmed",
+                )
+            )
+        page = client.get("/reports/daily")
+        assert page.status_code == 200
+        assert "ثبت‌های امروز تا این لحظه" in page.text
+        assert "کار ثبت‌شده امروز" in page.text

@@ -432,10 +432,18 @@ def register_routes(app: FastAPI) -> None:
         with session_scope(request.app.state.engine) as session:
             reference = _now() - (timedelta(days=1) if kind == "daily" else timedelta(days=7))
             content = build_digest(session, user, reference, kind)
+            today_content = build_digest(session, user, _now(), "daily") if kind == "daily" else None
         return templates.TemplateResponse(
             request=request,
             name="report.html",
-            context={"user": user, "csrf": csrf or "", "content": content, "kind": kind},
+            context={
+                "user": user,
+                "csrf": csrf or "",
+                "content": content,
+                "today_content": today_content,
+                "kind": kind,
+                "active_path": "/reports/daily" if kind == "daily" else "/reports/weekly",
+            },
         )
 
     @app.post("/reminders/{reminder_id}/status")
