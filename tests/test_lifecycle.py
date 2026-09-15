@@ -45,7 +45,9 @@ def test_owned_lifecycle_supports_revision_and_soft_delete(session):
 
     assert entries.soft_delete_record(record.id, other.id) is False
     assert entries.soft_delete_record(record.id, owner.id) is True
-    assert entries.soft_delete_reminder(reminder.id, owner.id) is True
-    assert entries.soft_delete_entry(entry.id, owner.id) is True
+    assert reminder.deleted_at is not None
+    assert entry.deleted_at is not None
+    assert entries.soft_delete_reminder(reminder.id, owner.id) is False
+    assert entries.soft_delete_entry(entry.id, owner.id) is False
     assert entries.get_owned_entry(entry.id, owner.id) is None
     assert entries.list_for_user(owner.id) == []

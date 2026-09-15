@@ -123,13 +123,13 @@ class EntryRepository:
                 select(ExtractedRecord).where(
                     ExtractedRecord.entry_id == entry_id,
                     ExtractedRecord.user_id == user_id,
-                    ExtractedRecord.deleted_at.is_(None),
                 )
             )
         )
         record_ids = [record.id for record in records]
         for record in records:
-            record.deleted_at = deleted_at
+            if record.deleted_at is None:
+                record.deleted_at = deleted_at
         if record_ids:
             reminders = self.session.scalars(
                 select(Reminder).where(
@@ -144,13 +144,11 @@ class EntryRepository:
         return True
 
     def soft_delete_record(self, record_id: int, user_id: int) -> bool:
+        """Delete the entire source entry selected by a record, including reminders."""
         record = self.get_owned_record(record_id, user_id)
         if record is None:
             return False
-        deleted_at = datetime.now(UTC)
-        record.deleted_at = deleted_at
-        self.session.flush()
-        return True
+        return self.soft_delete_entry(record.entry_id, user_id)
 
     def soft_delete_reminder(self, reminder_id: int, user_id: int) -> bool:
         reminder = self.session.scalar(

@@ -23,7 +23,7 @@
   </article>
   <article class="panel activity-panel">
     <div class="panel-head"><div><span class="panel-kicker">صندوقچه</span><h2>آخرین فعالیت‌ها</h2></div><a href="/today">همهٔ امروز ←</a></div>
-    {% if records %}<div class="mini-timeline">{% for record in records[:5] %}<div><span>{{ icons.get(record.category, '📝') }}</span><p><b>{{ record.title }}</b><small>{{ persian_datetime(record.created_at, user.timezone) }}</small></p></div>{% endfor %}</div>{% else %}<div class="empty-state">هنوز فعالیتی ثبت نشده است.<br><small>اولین پیام را در بله برای خودت بفرست.</small></div>{% endif %}
+    {% if records %}<div class="mini-timeline">{% for record in records[:5] %}<div><span>{{ icons.get(record.category, '📝') }}</span><p><b>{{ record.title }}</b><small>{{ persian_datetime(record.created_at, user.timezone) }}</small></p><div class="row-actions activity-actions"><a href="/entries/{{ record.entry_id }}/edit" title="ویرایش ثبت">✏️ ویرایش</a><form action="/records/{{ record.id }}/delete" method="post" onsubmit="return confirm('کل این ثبت و یادآوری‌های وابسته حذف شوند؟')"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" title="حذف کل ثبت">🗑 حذف ثبت</button></form></div></div>{% endfor %}</div>{% else %}<div class="empty-state">هنوز فعالیتی ثبت نشده است.<br><small>اولین پیام را در بله برای خودت بفرست.</small></div>{% endif %}
   </article>
 </section>
 <section class="workspace-note"><span>✦</span><div><b>هر موضوع، جای خودش</b><p>برای دیدن جزئیات، از سایدبار وارد امروز، این هفته، یادآوری‌ها یا یکی از دسته‌بندی‌ها شو.</p></div></section>

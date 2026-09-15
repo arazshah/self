@@ -299,6 +299,85 @@ def test_overview_links_to_independent_workspace_pages(test_settings):
         assert "stat-card" not in page.text
 
 
+def test_overview_activity_offers_confirmed_delete_for_whole_entry(test_settings):
+    app = create_app(test_settings)
+    app.state.ai = FakeAI()
+    app.state.bale = FakeBale()
+    with TestClient(app) as client:
+        _login_from_bale_start(client, app.state.bale, chat_id=7710)
+        with session_scope(app.state.engine) as session:
+            user = session.scalar(select(User).where(User.bale_chat_id == 7710))
+            entry = Entry(user_id=user.id, source_message_id=77101, transcript="تماس با علی")
+            session.add(entry)
+            session.flush()
+            record = ExtractedRecord(
+                user_id=user.id, entry_id=entry.id, category="reminder",
+                title="تماس با علی", status="confirmed",
+            )
+            session.add(record)
+            session.flush()
+            record_id = record.id
+
+        overview = client.get("/dashboard")
+        assert overview.status_code == 200
+        assert f'action="/records/{record_id}/delete"' in overview.text
+        assert "حذف ثبت" in overview.text
+        assert "confirm(" in overview.text
+
+        today = client.get("/today")
+        assert today.status_code == 200
+        assert f'action="/records/{record_id}/delete"' in today.text
+        assert "حذف ثبت" in today.text
+
+
+def test_dashboard_delete_removes_entry_all_records_and_linked_reminders(test_settings):
+    app = create_app(test_settings)
+    app.state.ai = FakeAI()
+    app.state.bale = FakeBale()
+    with TestClient(app) as client:
+        _login_from_bale_start(client, app.state.bale, chat_id=7711)
+        with session_scope(app.state.engine) as session:
+            user = session.scalar(select(User).where(User.bale_chat_id == 7711))
+            entry = Entry(user_id=user.id, source_message_id=77111,
+                          transcript="فردا به علی زنگ بزنم و قبض را پرداخت کنم")
+            session.add(entry)
+            session.flush()
+            entry_id = entry.id
+            contact = ExtractedRecord(
+                user_id=user.id, entry_id=entry.id, category="reminder",
+                title="تماس با علی", status="confirmed",
+            )
+            payment = ExtractedRecord(
+                user_id=user.id, entry_id=entry.id, category="finance",
+                title="پرداخت قبض", status="confirmed",
+            )
+            session.add_all([contact, payment])
+            session.flush()
+            record_id = contact.id
+            session.add(Reminder(
+                user_id=user.id, record_id=contact.id, text="تماس با علی",
+                due_at=datetime(2026, 9, 25, 8, tzinfo=UTC),
+            ))
+
+        response = client.post(
+            f"/records/{record_id}/delete",
+            data={"csrf": client.cookies.get("self_csrf")},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        with session_scope(app.state.engine) as session:
+            assert session.get(Entry, entry_id).deleted_at is not None
+            records = list(session.scalars(select(ExtractedRecord).where(ExtractedRecord.entry_id == entry_id)))
+            assert len(records) == 2
+            assert all(record.deleted_at is not None for record in records)
+            reminders = list(session.scalars(select(Reminder).where(Reminder.record_id == record_id)))
+            assert len(reminders) == 1
+            assert reminders[0].deleted_at is not None
+
+        assert "تماس با علی" not in client.get("/dashboard").text
+        assert "تماس با علی" not in client.get("/reminders").text
+
+
 def test_daily_report_page_also_shows_today_entries(test_settings):
     app = create_app(test_settings)
     app.state.ai = FakeAI()

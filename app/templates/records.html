@@ -22,7 +22,7 @@
         {% if record.status == 'needs_confirmation' and (record.category == 'reminder' or record.due_raw) %}<div class="time-warning">⚠️ زمان‌بندی نشده · زمان دقیق را اصلاح کن</div>
         {% elif record.due_at %}<div class="due-label">⏰ زمان یادآوری: {{ persian_datetime(record.due_at, user.timezone) }}</div>{% endif %}
       </div>
-      <div class="row-actions"><a href="/entries/{{ record.entry_id }}/edit">ویرایش</a><form action="/records/{{ record.id }}/delete" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><button>حذف</button></form></div>
+      <div class="row-actions"><a href="/entries/{{ record.entry_id }}/edit">✏️ ویرایش</a><form action="/records/{{ record.id }}/delete" method="post" onsubmit="return confirm('کل این ثبت و یادآوری‌های وابسته حذف شوند؟')"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" title="حذف کل ثبت">🗑 حذف ثبت</button></form></div>
     </article>
     {% endfor %}
   </div>
