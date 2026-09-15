@@ -38,6 +38,12 @@ HOUR_WORDS = {
     "هفده": 17, "هجده": 18, "نوزده": 19, "بیست": 20,
     "بیست و یک": 21, "بیست و دو": 22, "بیست و سه": 23,
 }
+DURATION_WORDS = {
+    "یک": 1, "دو": 2, "سه": 3, "چهار": 4, "پنج": 5, "شش": 6,
+    "هفت": 7, "هشت": 8, "نه": 9, "ده": 10, "یازده": 11,
+    "دوازده": 12, "پانزده": 15, "بیست": 20, "سی": 30,
+    "چهل": 40, "چهل و پنج": 45, "پنجاه": 50,
+}
 PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
 PERSIAN_OUTPUT_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
 
@@ -53,31 +59,50 @@ def _normalize(text: str) -> str:
     )
 
 
-def _time(text: str) -> tuple[int, int]:
+def _time(text: str) -> tuple[int, int] | None:
     words = "|".join(re.escape(word) for word in sorted(HOUR_WORDS, key=len, reverse=True))
     match = re.search(
         rf"ساعت\s*(\d{{1,2}}|{words})(?:(?:\s*[:：]\s*|\s*و\s*)(\d{{1,2}})(?:\s*دقیقه)?)?",
         text,
     )
     if not match:
-        return 9, 0
-    hour = int(match.group(1)) if match.group(1).isdigit() else HOUR_WORDS[match.group(1)]
-    minute = int(match.group(2) or (30 if re.search(r"\sو\s*نیم", text[match.end():]) else 0))
+        match = re.search(r"(?<!\d)(\d{1,2})\s*[:：]\s*(\d{2})(?!\d)", text)
+    if not match:
+        bare = re.search(
+            rf"(?:^|\s)(\d{{1,2}}|{words})\s*(?:صبح|عصر|شب|بامداد)(?=\s|$)", text
+        )
+        if not bare:
+            return None
+        hour = int(bare.group(1)) if bare.group(1).isdigit() else HOUR_WORDS[bare.group(1)]
+        minute = 0
+    else:
+        hour = int(match.group(1)) if match.group(1).isdigit() else HOUR_WORDS[match.group(1)]
+        minute = int(match.group(2) or (30 if re.search(r"\sو\s*نیم", text[match.end():]) else 0))
+    if "شب" in text or "عصر" in text or "بعدازظهر" in text:
+        if hour < 12:
+            hour += 12
+    elif "بامداد" in text and hour == 12:
+        hour = 0
     if hour > 23 or minute > 59:
         raise ValueError("زمان نامعتبر است")
     return hour, minute
 
 
 def _relative_duration(text: str, local_now: datetime) -> datetime | None:
-    minute_match = re.search(r"(\d+)\s*دقیقه\s*(?:دیگه|دیگر|بعد)", text)
+    words = "|".join(re.escape(word) for word in sorted(DURATION_WORDS, key=len, reverse=True))
+    number = rf"(\d+|{words})"
+    minute_match = re.search(rf"{number}\s*دقیقه\s*(?:دیگه|دیگر|بعد)", text)
     if minute_match:
-        return local_now + timedelta(minutes=int(minute_match.group(1)))
+        amount = minute_match.group(1)
+        minutes = int(amount) if amount.isdigit() else DURATION_WORDS[amount]
+        return local_now + timedelta(minutes=minutes) if minutes > 0 else None
     if re.search(r"نیم\s*ساعت\s*(?:دیگه|دیگر|بعد)", text):
         return local_now + timedelta(minutes=30)
-    hour_match = re.search(r"(?:یک|یک\s*ساعت|\d+\s*ساعت)\s*(?:دیگه|دیگر|بعد)", text)
+    hour_match = re.search(rf"{number}\s*ساعت\s*(?:دیگه|دیگر|بعد)", text)
     if hour_match:
-        amount = re.search(r"\d+", hour_match.group(0))
-        return local_now + timedelta(hours=int(amount.group()) if amount else 1)
+        amount = hour_match.group(1)
+        hours = int(amount) if amount.isdigit() else DURATION_WORDS[amount]
+        return local_now + timedelta(hours=hours) if hours > 0 else None
     return None
 
 
@@ -123,7 +148,26 @@ def resolve_persian_datetime(text: str, now: datetime, timezone_name: str) -> Re
             value=relative.astimezone(UTC),
             solar_date=_solar_date_string(solar.year, solar.month, solar.day),
         )
-    hour, minute = _time(normalized)
+
+    def unclear(message: str) -> ResolvedDate:
+        return ResolvedDate(raw=raw, needs_confirmation=True, clarification=message)
+
+    if re.search(r"(?:دیروز|پریروز|هفته\s*(?:گذشته|قبل)|ماه\s*(?:گذشته|قبل))", normalized):
+        return unclear("زمان گفته‌شده در گذشته است؛ تاریخ و ساعت آینده را مشخص کن.")
+    if re.search(r"(?:12|دوازده)\s*شب", normalized):
+        return unclear("ساعت ۱۲ شب مبهم است؛ لطفاً تاریخ و ساعت را به‌صورت ۰۰:۰۰ یا ۲۴ ساعته بگو.")
+    try:
+        parsed_time = _time(normalized)
+    except ValueError:
+        return unclear("ساعت یادآوری نامعتبر است؛ ساعت درست را بگو.")
+    if parsed_time is None:
+        return unclear("ساعت یادآوری مشخص نیست؛ روز و ساعت دقیق را بگو.")
+    hour, minute = parsed_time
+
+    def future(value: datetime, solar_date: str) -> ResolvedDate:
+        if value <= now.astimezone(UTC):
+            return unclear("زمان یادآوری در گذشته است؛ تاریخ و ساعت آینده را مشخص کن.")
+        return ResolvedDate(raw=raw, value=value, solar_date=solar_date)
 
     if "بعداً" in text or "بعدا" in normalized or "وقتی فرصت" in normalized:
         return ResolvedDate(
@@ -138,30 +182,24 @@ def resolve_persian_datetime(text: str, now: datetime, timezone_name: str) -> Re
             local_value = local_now + timedelta(days=days)
             local_value = local_value.replace(hour=hour, minute=minute, second=0, microsecond=0)
             solar = jdatetime.date.fromgregorian(date=local_value.date())
-            return ResolvedDate(
-                raw=raw,
-                value=local_value.astimezone(UTC),
-                solar_date=_solar_date_string(solar.year, solar.month, solar.day),
-            )
+            return future(local_value.astimezone(UTC), _solar_date_string(solar.year, solar.month, solar.day))
 
     compact = normalized.replace(" ", "")
     next_week = "هفتهآینده" in compact or "هفتهبعد" in compact
+    this_week = "اینهفته" in compact
     for name, weekday in sorted(WEEKDAYS.items(), key=lambda item: len(item[0]), reverse=True):
         if name in compact:
-            delta = (weekday - local_now.weekday()) % 7
-            if next_week:
-                delta += 7
-            elif delta == 0:
-                delta = 7
+            if next_week or this_week:
+                week_start = local_now.date() - timedelta(days=(local_now.weekday() - 5) % 7)
+                target_date = week_start + timedelta(days=(weekday - 5) % 7 + (7 if next_week else 0))
+                delta = (target_date - local_now.date()).days
+            else:
+                delta = (weekday - local_now.weekday()) % 7
             local_value = (local_now + timedelta(days=delta)).replace(
                 hour=hour, minute=minute, second=0, microsecond=0
             )
             solar = jdatetime.date.fromgregorian(date=local_value.date())
-            return ResolvedDate(
-                raw=raw,
-                value=local_value.astimezone(UTC),
-                solar_date=_solar_date_string(solar.year, solar.month, solar.day),
-            )
+            return future(local_value.astimezone(UTC), _solar_date_string(solar.year, solar.month, solar.day))
 
     explicit = re.search(
         r"(?:(\d{4})\s*[/\-]\s*)?(\d{1,2})\s*[/\-]\s*(\d{1,2})", normalized
@@ -183,8 +221,6 @@ def resolve_persian_datetime(text: str, now: datetime, timezone_name: str) -> Re
         day = int(month_match.group(1))
         month = MONTHS[month_match.group(2)]
         year = solar_now.year
-        if (month, day) < (solar_now.month, solar_now.day):
-            year += 1
 
     try:
         value = _solar_to_utc(year, month, day, hour, minute, tz)
@@ -194,8 +230,4 @@ def resolve_persian_datetime(text: str, now: datetime, timezone_name: str) -> Re
             needs_confirmation=True,
             clarification="این تاریخ معتبر نیست؛ لطفاً دوباره بررسی کن.",
         )
-    return ResolvedDate(
-        raw=raw,
-        value=value,
-        solar_date=_solar_date_string(year, month, day),
-    )
+    return future(value, _solar_date_string(year, month, day))

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Protocol
 
 from sqlalchemy.orm import Session
@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 from app.ai import normalize_extraction
 from app.models import Entry, ExtractedRecord, Reminder, User, utc_now
 from app.reports import CATEGORY_ICONS, CATEGORY_LABELS
-from app.schemas import ExtractedItem, ExtractionResult
-from app.time_utils import resolve_persian_datetime
+from app.schemas import ExtractedItem, ExtractionResult, ResolvedDate
+from app.time_utils import format_persian_datetime, resolve_persian_datetime
 
 ACTIONABLE_CATEGORIES = {
     "task",
@@ -56,33 +56,42 @@ async def _send_with_optional_keyboard(
 
 def _due_date(
     item: ExtractedItem, now: datetime, timezone_name: str, source_text: str | None = None
-):
-    source = item.evidence or source_text
-    candidates = [item.due_raw] if item.due_raw else []
-    if source and re.search(r"(?:ساعت|دقیقه|نیم\s*ساعت)", source) and not (
-        item.due_raw and re.search(r"(?:ساعت|دقیقه|نیم\s*ساعت)", item.due_raw)
+)-> ResolvedDate:
+    if item.category not in ACTIONABLE_CATEGORIES:
+        return ResolvedDate(raw="")
+    if (
+        item.category != "reminder" and not item.due_raw and source_text
+        and re.search(r"(?:دیروز|پریروز|هفته\s*(?:گذشته|قبل)|ماه\s*(?:گذشته|قبل))", source_text)
+        and "یادآور" not in source_text
     ):
-        candidates.insert(0, source)
+        return ResolvedDate(raw="")
+    time_marker = r"(?:ساعت|دقیقه|\d{1,2}\s*[:：]\s*\d{2})"
+    evidence_is_spoken = bool(
+        source_text and item.evidence and item.evidence in source_text
+        and re.search(time_marker, item.evidence)
+        and resolve_persian_datetime(item.evidence, now, timezone_name).value is not None
+    )
+    sources = (item.evidence, source_text) if evidence_is_spoken else (source_text, item.evidence)
+    candidates = [
+        source for source in sources
+        if source and re.search(time_marker, source)
+    ]
+    if item.due_raw:
+        candidates.append(item.due_raw)
     for candidate in candidates:
         resolved = resolve_persian_datetime(candidate, now, timezone_name)
-        if resolved.value is not None:
-            return resolved.value, resolved.solar_date
-    if item.due_at is not None:
-        value = item.due_at
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=UTC)
-        return value.astimezone(UTC), item.solar_date
-    if not item.due_raw:
-        return None, item.solar_date
-    resolved = resolve_persian_datetime(item.due_raw, now, timezone_name)
-    return resolved.value, resolved.solar_date
+        if resolved.value is not None or resolved.needs_confirmation:
+            return resolved
+    return ResolvedDate(raw=item.due_raw or "", solar_date=item.solar_date)
 
 
-def _confirmation_text(item: ExtractedItem, due_raw: str | None, clarification: str | None) -> str:
+def _confirmation_text(
+    item: ExtractedItem, due_at: datetime | None, timezone_name: str, clarification: str | None
+) -> str:
     category = f"{CATEGORY_ICONS.get(item.category, '📝')} {CATEGORY_LABELS.get(item.category, item.category)}"
-    suffix = f"\n⏰ زمان: {due_raw}" if due_raw else ""
     if clarification:
-        suffix += f"\n⚠️ {clarification}"
+        return f"⚠️ {category}: {item.title}\nیادآوری زمان‌بندی نشد. {clarification}\n✏️ متن و زمان را در سامانه اصلاح کن."
+    suffix = f"\n📅 زمان فهمیده‌شده: {format_persian_datetime(due_at, timezone_name)}" if due_at else ""
     return f"✅ ثبت شد\n{category}: {item.title}{suffix}"
 
 
@@ -112,9 +121,26 @@ async def process_entry(
     extraction = normalize_extraction(extraction, transcript)
     outgoing_messages: list[tuple[str, dict | None]] = []
     for item in extraction.items:
-        due_at, solar_date = _due_date(item, processing_now, user.timezone, transcript)
-        ambiguous = bool(item.due_raw and due_at is None)
+        resolved = _due_date(item, processing_now, user.timezone, transcript)
+        due_at, solar_date = resolved.value, resolved.solar_date
+        expired_during_processing = bool(
+            due_at is not None and due_at <= (now if now is not None else utc_now())
+        )
+        if expired_during_processing:
+            due_at = None
+        ambiguous = bool(
+            resolved.needs_confirmation or expired_during_processing
+            or (item.category == "reminder" and due_at is None)
+        )
         needs_confirmation = item.needs_confirmation or ambiguous
+        clarification = (
+            "زمان یادآوری هنگام پردازش گذشته است؛ تاریخ و ساعت آینده را مشخص کن."
+            if expired_during_processing else resolved.clarification
+        )
+        if clarification is None and item.category == "reminder" and due_at is None:
+            clarification = "روز و ساعت یادآوری مشخص نیست؛ هر دو را واضح بگو."
+        if item.needs_confirmation and due_at is not None:
+            clarification = "زمان استخراج‌شده نیاز به بررسی دارد؛ متن و زمان را اصلاح کن."
         record = ExtractedRecord(
             user_id=user.id,
             entry_id=entry.id,
@@ -144,10 +170,16 @@ async def process_entry(
             (
                 _confirmation_text(
                     item,
-                    item.due_raw,
-                    extraction.clarification if ambiguous else None,
+                    due_at if not needs_confirmation else None,
+                    user.timezone,
+                    clarification or extraction.clarification if needs_confirmation else None,
                 ),
-                None,
+                {
+                    "inline_keyboard": [[{
+                        "text": "✏️ اصلاح زمان",
+                        "callback_data": f"entry:edit:{entry.id}",
+                    }]]
+                } if needs_confirmation and item.category in ACTIONABLE_CATEGORIES else None,
             )
         )
 

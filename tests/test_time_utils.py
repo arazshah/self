@@ -92,3 +92,66 @@ def test_resolves_relative_half_hour():
     assert due.date().isoformat() == "2026-09-16"
     assert due.hour == 0
     assert due.minute == 20
+
+
+def test_date_without_hour_is_not_scheduled():
+    now = datetime(2026, 9, 15, 15, 30, tzinfo=TEHRAN)
+    for phrase in ("امروز یادآوری کن", "فردا یادآوری کن", "هفته آینده سه شنبه"):
+        result = resolve_persian_datetime(phrase, now, "Asia/Tehran")
+        assert result.value is None
+        assert result.needs_confirmation
+        assert "ساعت" in result.clarification
+
+
+def test_past_times_and_dates_are_rejected_instead_of_rolled_forward():
+    now = datetime(2026, 9, 15, 15, 30, tzinfo=TEHRAN)
+    for phrase in (
+        "امروز ساعت ۹",
+        "۱۴۰۵/۰۶/۲۳ ساعت ۱۰",
+        "۲۳ شهریور ساعت ۱۰",
+        "این هفته دوشنبه ساعت ۸",
+        "دیروز ساعت ۱۰",
+    ):
+        result = resolve_persian_datetime(phrase, now, "Asia/Tehran")
+        assert result.value is None
+        assert result.needs_confirmation
+        assert "گذشته" in result.clarification
+
+
+def test_night_and_evening_hour_are_understood():
+    now = datetime(2026, 9, 15, 15, 30, tzinfo=TEHRAN)
+    result = resolve_persian_datetime("فردا ساعت ۹ شب", now, "Asia/Tehran")
+    assert result.value.astimezone(TEHRAN).hour == 21
+    evening = resolve_persian_datetime("فردا ساعت ۶ عصر", now, "Asia/Tehran")
+    assert evening.value.astimezone(TEHRAN).hour == 18
+
+
+def test_invalid_hour_requires_clarification_without_throwing():
+    now = datetime(2026, 9, 15, 15, 30, tzinfo=TEHRAN)
+    result = resolve_persian_datetime("فردا ساعت ۲۵", now, "Asia/Tehran")
+    assert result.value is None
+    assert result.needs_confirmation
+    assert "نامعتبر" in result.clarification
+
+
+def test_spoken_relative_durations_use_current_clock():
+    now = datetime(2026, 9, 15, 15, 30, tzinfo=TEHRAN)
+    minutes = resolve_persian_datetime("پنج دقیقه دیگر یادآوری کن", now, "Asia/Tehran")
+    hours = resolve_persian_datetime("دو ساعت بعد یادآوری کن", now, "Asia/Tehran")
+    assert minutes.value.astimezone(TEHRAN).hour == 15
+    assert minutes.value.astimezone(TEHRAN).minute == 35
+    assert hours.value.astimezone(TEHRAN).hour == 17
+    assert hours.value.astimezone(TEHRAN).minute == 30
+
+
+def test_day_with_bare_clock_and_period_is_precise():
+    now = datetime(2026, 9, 15, 15, 30, tzinfo=TEHRAN)
+    result = resolve_persian_datetime("فردا ۹ شب زنگ بزنم", now, "Asia/Tehran")
+    assert result.value.astimezone(TEHRAN).hour == 21
+
+
+def test_twelve_at_night_requires_clarification():
+    now = datetime(2026, 9, 15, 15, 30, tzinfo=TEHRAN)
+    result = resolve_persian_datetime("فردا ساعت ۱۲ شب", now, "Asia/Tehran")
+    assert result.value is None
+    assert result.needs_confirmation

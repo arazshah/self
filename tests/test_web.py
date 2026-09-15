@@ -252,3 +252,27 @@ def test_daily_report_page_also_shows_today_entries(test_settings):
         assert page.status_code == 200
         assert "ثبت‌های امروز تا این لحظه" in page.text
         assert "کار ثبت‌شده امروز" in page.text
+
+
+def test_unscheduled_reminder_is_flagged_in_category_page(test_settings):
+    app = create_app(test_settings)
+    app.state.ai = FakeAI()
+    app.state.bale = FakeBale()
+    with TestClient(app) as client:
+        _login_from_bale_start(client, app.state.bale, chat_id=7703)
+        with session_scope(app.state.engine) as session:
+            user = session.scalar(select(User).where(User.bale_chat_id == 7703))
+            entry = Entry(
+                user_id=user.id, source_message_id=7003,
+                transcript="فردا یادآوری کن", created_at=datetime.now(UTC),
+            )
+            session.add(entry)
+            session.flush()
+            session.add(ExtractedRecord(
+                user_id=user.id, entry_id=entry.id, category="reminder", title="تماس",
+                due_raw="فردا", confidence=0.9, status="needs_confirmation",
+            ))
+        page = client.get("/categories/reminder")
+        assert page.status_code == 200
+        assert "زمان‌بندی نشده" in page.text
+        assert "زمان دقیق را اصلاح کن" in page.text
